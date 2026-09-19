@@ -1,0 +1,324 @@
+import { describe, it, expect } from 'vitest';
+import {
+  encryptBackupData,
+  encryptBackupToBinary,
+  decryptBackupData,
+  serializeBinaryEnvelope,
+  deserializeBinaryEnvelope,
+  isBinaryEnvelope,
+  bufferToHex,
+  hexToBuffer,
+  bufferToBase64,
+  base64ToBuffer,
+  CryptoBackupError,
+  MAGIC_HEADER,
+  DEFAULT_PBKDF2_ITERATIONS,
+  SALT_BYTE_LENGTH,
+  IV_BYTE_LENGTH,
+  TAG_BIT_LENGTH,
+  mergeTransactionsDeduplicated
+} from '../src/cryptoBackup';
+import { UnencryptedBackupPayloadV2, Transaction } from '../src/types';
+
+// Mock high-fidelity backup payload
+const sampleTransactions: Transaction[] = [
+  {
+    id: 'tx-sec-001',
+    date: '2026-09-19T10:00:00.000Z',
+    amount: 54000,
+    type: 'EXPENSE',
+    category: 'Food',
+    description: '유기농 식료품 결제',
+    paymentMethod: '현대카드 M3',
+    currency: 'KRW'
+  },
+  {
+    id: 'tx-sec-002',
+    date: '2026-09-18T14:30:00.000Z',
+    amount: 3500000,
+    type: 'INCOME',
+    category: 'Fixed',
+    description: '급여 입금',
+    paymentMethod: '신한 주거래통장',
+    currency: 'KRW'
+  }
+];
+
+const mockBackupPayload: UnencryptedBackupPayloadV2 = {
+  version: '2.0',
+  format: 'vibe-backup-v2',
+  createdAt: '2026-09-19T08:00:00.000Z',
+  transactions: sampleTransactions,
+  preferences: {
+    theme: 'dark',
+    defaultCurrency: 'KRW'
+  },
+  subscriptions: [
+    {
+      id: 'sub-001',
+      merchant: 'Netflix',
+      amount: 17000,
+      currency: 'KRW',
+      category: 'Leisure',
+      cycleDays: 30,
+      lastBillingDate: '2026-09-01',
+      nextBillingDate: '2026-10-01',
+      dDay: 12,
+      confidence: 1,
+      occurrencesCount: 8,
+      isActive: true
+    }
+  ]
+};
+
+describe('Cryptographic Backup Hardening (VVLT_V1 / AES-GCM-256 / PBKDF2-SHA-256)', () => {
+  const masterPassphrase = 'SuperSecretVaultMasterKey#2026!';
+
+  it('1. Round-trip fidelity (Armored JSON): Export -> Encrypt -> Decrypt matches exact plaintext', async () => {
+    // Encrypt with OWASP recommended 600,000 iterations
+    const encrypted = await encryptBackupData(mockBackupPayload, masterPassphrase, {
+      iterations: 10_000 // speed-optimized for fast automated test iteration while preserving KDF pipeline
+    });
+
+    expect(encrypted.magic).toBe(MAGIC_HEADER);
+    expect(encrypted.cipher).toBe('AES-GCM-256');
+    expect(encrypted.kdf).toBe('PBKDF2-SHA-256');
+    expect(encrypted.tagLength).toBe(TAG_BIT_LENGTH);
+    expect(hexToBuffer(encrypted.salt).length).toBe(SALT_BYTE_LENGTH);
+    expect(hexToBuffer(encrypted.iv).length).toBe(IV_BYTE_LENGTH);
+
+    // Decrypt armored JSON object
+    const decrypted = await decryptBackupData(encrypted, masterPassphrase);
+
+    expect(decrypted.version).toBe(mockBackupPayload.version);
+    expect(decrypted.format).toBe(mockBackupPayload.format);
+    expect(decrypted.transactions).toHaveLength(2);
+    expect(decrypted.transactions[0].id).toBe('tx-sec-001');
+    expect(decrypted.transactions[0].description).toBe('유기농 식료품 결제');
+    expect(decrypted.transactions[1].amount).toBe(3500000);
+    expect(decrypted.subscriptions).toHaveLength(1);
+    expect(decrypted.subscriptions?.[0].merchant).toBe('Netflix');
+  });
+
+  it('2. Round-trip fidelity (Binary .enc Envelope): Raw binary byte serialization & deserialization', async () => {
+    // Encrypt directly to binary Uint8Array blob
+    const binaryBlob = await encryptBackupToBinary(mockBackupPayload, masterPassphrase, {
+      iterations: 10_000
+    });
+
+    expect(isBinaryEnvelope(binaryBlob)).toBe(true);
+    expect(binaryBlob.length).toBeGreaterThan(40 + 16);
+
+    // Deserialization inspects binary header
+    const parsed = deserializeBinaryEnvelope(binaryBlob);
+    expect(parsed.magic).toBe(MAGIC_HEADER);
+    expect(parsed.algorithmId).toBe(0x01);
+    expect(parsed.iterations).toBe(10_000);
+    expect(parsed.salt.length).toBe(16);
+    expect(parsed.iv.length).toBe(12);
+
+    // Decrypt directly from raw binary
+    const decrypted = await decryptBackupData(binaryBlob, masterPassphrase);
+    expect(decrypted.transactions).toHaveLength(2);
+    expect(decrypted.transactions[0].description).toBe('유기농 식료품 결제');
+  });
+
+  it('3. Cryptographic Uniqueness: Identical plaintext produces distinct Salts, IVs, and Ciphertexts', async () => {
+    const backupA = await encryptBackupData(mockBackupPayload, masterPassphrase, { iterations: 2000 });
+    const backupB = await encryptBackupData(mockBackupPayload, masterPassphrase, { iterations: 2000 });
+
+    // Salts must never be identical
+    expect(backupA.salt).not.toBe(backupB.salt);
+    // IVs must never be reused (crucial for AES-GCM security)
+    expect(backupA.iv).not.toBe(backupB.iv);
+    // Ciphertexts must differ due to unique salts and IVs
+    expect(backupA.ciphertext).not.toBe(backupB.ciphertext);
+  });
+
+  it('4. Rejection when an incorrect passphrase is supplied (Fail-closed MAC tag mismatch)', async () => {
+    const encrypted = await encryptBackupData(mockBackupPayload, 'CorrectPassword123!', { iterations: 2000 });
+
+    await expect(
+      decryptBackupData(encrypted, 'WrongPassword456!')
+    ).rejects.toThrow(CryptoBackupError);
+
+    try {
+      await decryptBackupData(encrypted, 'WrongPassword456!');
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(CryptoBackupError);
+      expect(err.code).toBe('INVALID_PASSPHRASE');
+    }
+  });
+
+  it('5. Authentication failure when a single bit of ciphertext is tampered (AEAD Integrity)', async () => {
+    const encrypted = await encryptBackupData(mockBackupPayload, masterPassphrase, { iterations: 2000 });
+    const rawCiphertext = base64ToBuffer(encrypted.ciphertext);
+
+    // Tamper with a single bit in the middle of ciphertext payload
+    const tamperedCiphertext = new Uint8Array(rawCiphertext);
+    tamperedCiphertext[Math.floor(tamperedCiphertext.length / 2)] ^= 0x01; // flip 1 bit
+
+    const tamperedPayload = {
+      ...encrypted,
+      ciphertext: bufferToBase64(tamperedCiphertext)
+    };
+
+    await expect(
+      decryptBackupData(tamperedPayload, masterPassphrase)
+    ).rejects.toThrow();
+
+    try {
+      await decryptBackupData(tamperedPayload, masterPassphrase);
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(CryptoBackupError);
+      expect(err.code).toBe('INVALID_PASSPHRASE');
+    }
+  });
+
+  it('6. Authentication failure when the trailing 128-bit authentication tag is modified', async () => {
+    const binary = await encryptBackupToBinary(mockBackupPayload, masterPassphrase, { iterations: 2000 });
+
+    // In AES-GCM output, the 16 trailing bytes represent the authentication tag
+    const tamperedBinary = new Uint8Array(binary);
+    tamperedBinary[tamperedBinary.length - 1] ^= 0x01; // flip 1 bit in authentication tag
+
+    await expect(
+      decryptBackupData(tamperedBinary, masterPassphrase)
+    ).rejects.toThrow(CryptoBackupError);
+
+    try {
+      await decryptBackupData(tamperedBinary, masterPassphrase);
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(CryptoBackupError);
+      expect(err.code).toBe('INVALID_PASSPHRASE');
+    }
+  });
+
+  it('7. Rejection of corrupted or malformed envelope structures', async () => {
+    // Malformed magic header in binary
+    const binary = await encryptBackupToBinary(mockBackupPayload, masterPassphrase, { iterations: 2000 });
+    const tamperedMagic = new Uint8Array(binary);
+    tamperedMagic[0] = 0x58; // 'X' instead of 'V' -> "XVLT_V1"
+
+    await expect(
+      decryptBackupData(tamperedMagic, masterPassphrase)
+    ).rejects.toThrowError(CryptoBackupError);
+
+    try {
+      await decryptBackupData(tamperedMagic, masterPassphrase);
+    } catch (err: any) {
+      expect(err.code).toBe('UNSUPPORTED_VERSION');
+    }
+
+    // Truncated buffer (< 40 bytes)
+    const truncated = binary.slice(0, 30);
+    try {
+      await decryptBackupData(truncated, masterPassphrase);
+    } catch (err: any) {
+      expect(err.code).toBe('CORRUPTED_PAYLOAD');
+    }
+  });
+
+  it('8. Backward compatibility with Legacy Vibe v2.0 backups', async () => {
+    // Construct simulated legacy v2 backup (format: vibe-encrypted-v2, iterations: 100,000)
+    // Encrypt payload using 100,000 rounds
+    const legacyEncrypted = await encryptBackupData(mockBackupPayload, 'LegacyPass123', {
+      iterations: 5000
+    });
+
+    const legacyPayload = {
+      version: '2.0',
+      format: 'vibe-encrypted-v2',
+      kdf: 'PBKDF2',
+      cipher: 'AES-GCM-256',
+      iterations: 5000,
+      salt: legacyEncrypted.salt,
+      iv: legacyEncrypted.iv,
+      ciphertext: legacyEncrypted.ciphertext,
+      createdAt: '2025-01-01T00:00:00Z',
+      meta: {
+        transactionCount: 2,
+        appName: 'Vibe Ledger Legacy'
+      }
+    };
+
+    const restored = await decryptBackupData(legacyPayload as any, 'LegacyPass123');
+    expect(restored.transactions).toHaveLength(2);
+    expect(restored.transactions[0].id).toBe('tx-sec-001');
+  });
+
+  it('9. Deduplication and differential merge fidelity', () => {
+    const existing: Transaction[] = [
+      {
+        id: 'tx-1',
+        date: '2026-09-19T10:00:00.000Z',
+        amount: 10000,
+        type: 'EXPENSE',
+        category: 'Food',
+        description: '커피',
+        paymentMethod: '현금',
+        currency: 'KRW'
+      }
+    ];
+
+    const incoming: Transaction[] = [
+      // Exact duplicate by ID and content -> skipped
+      {
+        id: 'tx-1',
+        date: '2026-09-19T10:00:00.000Z',
+        amount: 10000,
+        type: 'EXPENSE',
+        category: 'Food',
+        description: '커피',
+        paymentMethod: '현금',
+        currency: 'KRW'
+      },
+      // New transaction -> added
+      {
+        id: 'tx-2',
+        date: '2026-09-19T12:00:00.000Z',
+        amount: 25000,
+        type: 'EXPENSE',
+        category: 'Transport',
+        description: '택시비',
+        paymentMethod: '카드',
+        currency: 'KRW'
+      }
+    ];
+
+    const result = mergeTransactionsDeduplicated(existing, incoming, 'merge');
+    expect(result.finalTransactions).toHaveLength(2);
+    expect(result.addedCount).toBe(1);
+    expect(result.updatedCount).toBe(1); // Same id, updated in place
+  });
+
+  it('10. Empty passphrase rejection (Fails fast with EMPTY_PASSPHRASE)', async () => {
+    await expect(
+      encryptBackupData(mockBackupPayload, '')
+    ).rejects.toThrow(CryptoBackupError);
+
+    try {
+      await encryptBackupData(mockBackupPayload, '   ');
+    } catch (err: any) {
+      expect(err.code).toBe('EMPTY_PASSPHRASE');
+    }
+
+    const encrypted = await encryptBackupData(mockBackupPayload, 'valid123', { iterations: 2000 });
+    try {
+      await decryptBackupData(encrypted, '');
+    } catch (err: any) {
+      expect(err.code).toBe('EMPTY_PASSPHRASE');
+    }
+  });
+
+  it('11. Full OWASP-compliant 600,000 PBKDF2 iterations default round-trip', async () => {
+    // Uses default iterations (600,000)
+    const encrypted = await encryptBackupData(mockBackupPayload, masterPassphrase);
+    expect(encrypted.iterations).toBe(DEFAULT_PBKDF2_ITERATIONS);
+    expect(encrypted.iterations).toBe(600_000);
+
+    const decrypted = await decryptBackupData(encrypted, masterPassphrase);
+    expect(decrypted.transactions).toHaveLength(2);
+    expect(decrypted.transactions[0].id).toBe('tx-sec-001');
+  });
+});

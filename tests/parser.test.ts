@@ -1,79 +1,77 @@
+import { describe, it, expect } from 'vitest';
 import { 
   parseFinancialInputDeterministically, 
   parseKoreanAmount, 
   anonymizeFinancialInput 
 } from '../src/financialParser';
 
-function assert(condition: boolean, message: string) {
-  if (!condition) {
-    throw new Error(`FAIL: ${message}`);
-  }
-  console.log(`PASS: ${message}`);
-}
+describe('Financial Parser Deterministic Engine', () => {
+  it('parses Korean amount representations accurately', () => {
+    expect(parseKoreanAmount('4만원')).toBe(40000);
+    expect(parseKoreanAmount('4만 5천원')).toBe(45000);
+    expect(parseKoreanAmount('1.5만')).toBe(15000);
+    expect(parseKoreanAmount('3,500,000원')).toBe(3500000);
+    expect(parseKoreanAmount('150만원')).toBe(1500000);
+    expect(parseKoreanAmount('20k')).toBe(20000);
+    expect(parseKoreanAmount('$35')).toBe(35);
+    expect(parseKoreanAmount('1억 2천만원')).toBe(120000000);
+  });
 
-console.log('=== Running Financial Parser Test Suite ===\n');
+  it('anonymizes and strips sensitive PII (card, phone, RRN)', () => {
+    const piiInput = '신한카드 9410-1234-5678-9999로 010-1234-5678에서 5만원 결제함 950101-1234567';
+    const sanitized = anonymizeFinancialInput(piiInput);
+    expect(sanitized).not.toContain('9410-1234-5678-9999');
+    expect(sanitized).not.toContain('010-1234-5678');
+    expect(sanitized).not.toContain('950101-1234567');
+    expect(sanitized).toContain('[CARD]');
+  });
 
-// Test 1: Korean Amount Parsing
-assert(parseKoreanAmount('4만원') === 40000, '4만원 parses to 40,000');
-assert(parseKoreanAmount('4만 5천원') === 45000, '4만 5천원 parses to 45,000');
-assert(parseKoreanAmount('1.5만') === 15000, '1.5만 parses to 15,000');
-assert(parseKoreanAmount('3,500,000원') === 3500000, '3,500,000원 parses to 3,500,000');
-assert(parseKoreanAmount('150만원') === 1500000, '150만원 parses to 1,500,000');
-assert(parseKoreanAmount('20k') === 20000, '20k parses to 20,000');
-assert(parseKoreanAmount('$35') === 35, '$35 parses to 35');
-assert(parseKoreanAmount('1억 2천만원') === 120000000, '1억 2천만원 parses to 120,000,000');
+  it('correctly splits Dutch Pay into expense and settlement', () => {
+    const dutchPrompt = '민수랑 파스타 4만원 더치페이하고 토스로 2만원 받음';
+    const dutchResult = parseFinancialInputDeterministically(dutchPrompt);
+    expect(dutchResult).toHaveLength(2);
+    expect(dutchResult[0].type).toBe('EXPENSE');
+    expect(dutchResult[0].amount).toBe(40000);
+    expect(dutchResult[0].category).toBe('Food');
+    expect(dutchResult[1].type).toBe('SETTLEMENT');
+    expect(dutchResult[1].amount).toBe(20000);
+    expect(dutchResult[1].paymentMethod).toBe('Toss');
+  });
 
-// Test 2: PII Sanitization
-const piiInput = '신한카드 9410-1234-5678-9999로 010-1234-5678에서 5만원 결제함 950101-1234567';
-const sanitized = anonymizeFinancialInput(piiInput);
-assert(!sanitized.includes('9410-1234-5678-9999'), 'Card number is stripped');
-assert(!sanitized.includes('010-1234-5678'), 'Phone number is stripped');
-assert(!sanitized.includes('950101-1234567'), 'RRN is stripped');
-assert(sanitized.includes('[CARD]'), 'Card token added');
+  it('suggests appropriate categories and subcategories', () => {
+    const starbucksResult = parseFinancialInputDeterministically('스타벅스 아메리카노 4500원 카드 결제');
+    expect(starbucksResult[0].amount).toBe(4500);
+    expect(starbucksResult[0].category).toBe('Food');
+    expect(starbucksResult[0].subCategory).toBe('Cafe');
 
-// Test 3: Dutch Pay Parsing (The critical bug)
-const dutchPrompt = '민수랑 파스타 4만원 더치페이하고 토스로 2만원 받음';
-const dutchResult = parseFinancialInputDeterministically(dutchPrompt);
-assert(dutchResult.length === 2, 'Dutch pay creates 2 transactions (expense & settlement)');
-assert(dutchResult[0].type === 'EXPENSE', 'First transaction is EXPENSE');
-assert(dutchResult[0].amount === 40000, 'Expense amount is 40,000 (not 4)');
-assert(dutchResult[0].category === 'Food', 'Category is Food (not Uncategorized)');
-assert(dutchResult[1].type === 'SETTLEMENT', 'Second transaction is SETTLEMENT');
-assert(dutchResult[1].amount === 20000, 'Settlement amount is 20,000');
-assert(dutchResult[1].paymentMethod === 'Toss', 'Settlement method is Toss');
+    const emartResult = parseFinancialInputDeterministically('이마트 장보기 35000원 현대카드');
+    expect(emartResult[0].amount).toBe(35000);
+    expect(emartResult[0].category).toBe('Food');
+    expect(emartResult[0].subCategory).toBe('Grocery');
+    expect(emartResult[0].paymentMethod).toBe('현대카드');
 
-// Test 4: Quick Tag Suggestions
-const starbucksResult = parseFinancialInputDeterministically('스타벅스 아메리카노 4500원 카드 결제');
-assert(starbucksResult[0].amount === 4500, 'Starbucks amount is 4500');
-assert(starbucksResult[0].category === 'Food', 'Starbucks category is Food');
-assert(starbucksResult[0].subCategory === 'Cafe', 'Starbucks subCategory is Cafe');
+    const sundubuResult = parseFinancialInputDeterministically('점심 순두부찌개 12000원 계좌이체');
+    expect(sundubuResult[0].amount).toBe(12000);
+    expect(sundubuResult[0].category).toBe('Food');
+    expect(sundubuResult[0].subCategory).toBe('Dining');
+  });
 
-const emartResult = parseFinancialInputDeterministically('이마트 장보기 35000원 현대카드');
-assert(emartResult[0].amount === 35000, 'Emart amount is 35000');
-assert(emartResult[0].category === 'Food', 'Emart category is Food');
-assert(emartResult[0].subCategory === 'Grocery', 'Emart subCategory is Grocery');
-assert(emartResult[0].paymentMethod === '현대카드', 'Payment method is 현대카드');
+  it('handles multi-item compound clauses', () => {
+    const multiResult = parseFinancialInputDeterministically('쿠팡에서 화장지 2만원, 영양제 3만원 결제함');
+    expect(multiResult).toHaveLength(2);
+    expect(multiResult[0].amount).toBe(20000);
+    expect(multiResult[0].category).toBe('Living');
+    expect(multiResult[1].amount).toBe(30000);
+    expect(multiResult[1].category).toBe('Health');
+  });
 
-const sundubuResult = parseFinancialInputDeterministically('점심 순두부찌개 12000원 계좌이체');
-assert(sundubuResult[0].amount === 12000, 'Sundubu amount is 12000');
-assert(sundubuResult[0].category === 'Food', 'Sundubu category is Food');
-assert(sundubuResult[0].subCategory === 'Dining', 'Sundubu subCategory is Dining');
+  it('identifies salary income and transfers', () => {
+    const salaryResult = parseFinancialInputDeterministically('이번 달 월급 3,500,000원 기업은행 입금');
+    expect(salaryResult[0].type).toBe('INCOME');
+    expect(salaryResult[0].amount).toBe(3500000);
 
-// Test 5: Multi-item clauses
-const multiResult = parseFinancialInputDeterministically('쿠팡에서 화장지 2만원, 영양제 3만원 결제함');
-assert(multiResult.length === 2, 'Multi-clause creates 2 items');
-assert(multiResult[0].amount === 20000, 'First item is 20000');
-assert(multiResult[0].category === 'Living', 'First item is Living');
-assert(multiResult[1].amount === 30000, 'Second item is 30000');
-assert(multiResult[1].category === 'Health', 'Second item is Health');
-
-// Test 6: Salary & Transfer
-const salaryResult = parseFinancialInputDeterministically('이번 달 월급 3,500,000원 기업은행 입금');
-assert(salaryResult[0].type === 'INCOME', 'Salary type is INCOME');
-assert(salaryResult[0].amount === 3500000, 'Salary amount is 3,500,000');
-
-const transferResult = parseFinancialInputDeterministically('주택청약 통장으로 150만원 자동이체');
-assert(transferResult[0].type === 'TRANSFER', 'Transfer type is TRANSFER');
-assert(transferResult[0].amount === 1500000, 'Transfer amount is 1,500,000');
-
-console.log('\n=== All Tests Passed Successfully! ===');
+    const transferResult = parseFinancialInputDeterministically('주택청약 통장으로 150만원 자동이체');
+    expect(transferResult[0].type).toBe('TRANSFER');
+    expect(transferResult[0].amount).toBe(1500000);
+  });
+});

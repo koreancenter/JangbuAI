@@ -140,20 +140,32 @@ export interface CashflowForecastSummary {
   dataPoints: CashflowForecastPoint[];
 }
 
-// Phase 4: Encrypted Local-First Backup Protocol v2.0
+// Cryptographic Backup Hardening: Hardened Envelope Protocol
+export type CryptoBackupErrorCode =
+  | 'INVALID_PASSPHRASE'
+  | 'CORRUPTED_PAYLOAD'
+  | 'UNSUPPORTED_VERSION'
+  | 'EMPTY_PASSPHRASE';
+
 export interface EncryptedBackupPayload {
-  version: '2.0';
-  format: 'vibe-encrypted-v2';
-  kdf: 'PBKDF2';
+  version: '2.0' | 'VVLT_V1' | string;
+  format: 'vibe-encrypted-v2' | 'vibe-vault-encrypted-v1' | string;
+  kdf: 'PBKDF2' | 'PBKDF2-SHA-256' | string;
   cipher: 'AES-GCM-256';
   iterations: number;
   salt: string; // Hex
   iv: string; // Hex
   ciphertext: string; // Base64
   createdAt: string;
+  magic?: string; // e.g. "VVLT_V1"
+  tagLength?: number; // 128
+  rawBinaryBase64?: string; // Optional embedded binary envelope in base64
   meta: {
     transactionCount: number;
     appName: string;
+    envelope?: 'armored-json' | 'binary-enc';
+    checksum?: string;
+    [key: string]: any;
   };
 }
 

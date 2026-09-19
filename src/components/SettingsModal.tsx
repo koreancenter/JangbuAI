@@ -52,7 +52,13 @@ import { getAllTransactions, addTransactions, clearAllTransactions, replaceAllTr
 import { Transaction, ChartPaletteType, EncryptedBackupPayload, UnencryptedBackupPayloadV2 } from '../types';
 import { SmartAssetSetup } from './SmartAssetSetup';
 import { CHART_PALETTES } from '../themePalettes';
-import { encryptBackupData, decryptBackupData, mergeTransactionsDeduplicated } from '../cryptoBackup';
+import {
+  encryptBackupData,
+  decryptBackupData,
+  mergeTransactionsDeduplicated,
+  isBinaryEnvelope,
+  CryptoBackupError
+} from '../cryptoBackup';
 import { loadSavedSubscriptions, saveSubscriptions } from '../autonomousFinance';
 import {
   hasVaultPin,
@@ -516,9 +522,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           setStatusMessage({ type: 'error', text: '암호화할 비밀번호를 입력해주세요.' });
           return;
         }
-        const encrypted = await encryptBackupData(backupPayload, exportPassphrase.trim());
+        const encrypted = await encryptBackupData(backupPayload, exportPassphrase.trim(), {
+          appName: 'Vibe Vault Pro'
+        });
         downloadDataStr = "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(encrypted, null, 2));
-        downloadFilename = `vibe-ledger-backup-encrypted-${new Date().toISOString().slice(0, 10)}.vibe.enc`;
+        downloadFilename = `vibe-vault-backup-encrypted-${new Date().toISOString().slice(0, 10)}.vibe.enc`;
       } else {
         downloadDataStr = "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupPayload, null, 2));
       }
@@ -538,25 +546,49 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       setStatusMessage({ 
         type: 'success', 
         text: enablePasswordProtection 
-          ? `AES-256 암호화된 백업 파일(${txs.length}건)을 안전하게 내보냈습니다.` 
+          ? `AES-GCM-256 (PBKDF2 60만 회) 강화 암호화 백업(${txs.length}건)을 안전하게 내보냈습니다.` 
           : `${txs.length}건의 거래 내역을 JSON 파일로 내보냈습니다.` 
       });
     } catch (err: any) {
-      setStatusMessage({ type: 'error', text: '내보내기 실패: ' + err.message });
+      setStatusMessage({ type: 'error', text: '내보내기 실패: ' + (err.message || String(err)) });
     }
   };
 
-  // Phase 4: Restore File (handles plain JSON & AES-GCM encrypted .vibe.enc)
+  // Phase 4 / Hardening: Restore File (handles plain JSON, armored .vibe.enc & binary .enc)
   const handleRestoreFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     try {
-      const text = await file.text();
-      const json = JSON.parse(text);
+      const arrayBuffer = await file.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuffer);
 
-      // Check if file is encrypted with AES-GCM-256
-      if (json.cipher === 'AES-GCM-256' || json.format === 'vibe-encrypted-v2') {
+      // Check if it starts with the "VVLT_V1" binary magic envelope
+      if (isBinaryEnvelope(uint8)) {
+        setPendingEncryptedData(uint8);
+        setDecryptPassphrase('');
+        setIsDecryptModalOpen(true);
+        return;
+      }
+
+      // Otherwise attempt to decode as UTF-8 JSON text
+      const text = new TextDecoder('utf-8').decode(uint8);
+      let json: any;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        setStatusMessage({ type: 'error', text: '백업 파일을 읽을 수 없습니다. 올바른 .json 또는 .enc 암호화 파일인지 확인해주세요.' });
+        return;
+      }
+
+      // Check if file is encrypted (Hardened VVLT_V1 or Legacy v2)
+      if (
+        json.cipher === 'AES-GCM-256' ||
+        json.format === 'vibe-vault-encrypted-v1' ||
+        json.format === 'vibe-encrypted-v2' ||
+        json.version === 'VVLT_V1' ||
+        json.magic === 'VVLT_V1'
+      ) {
         setPendingEncryptedData(json);
         setDecryptPassphrase('');
         setIsDecryptModalOpen(true);
@@ -566,13 +598,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       // Plain JSON backup
       prepareRestore(json);
     } catch (err: any) {
-      setStatusMessage({ type: 'error', text: '백업 파일을 읽는 데 실패했습니다: ' + err.message });
+      setStatusMessage({ type: 'error', text: '백업 파일을 읽는 데 실패했습니다: ' + (err.message || String(err)) });
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  // Decryption execution
+  // Decryption execution with typed CryptoBackupError handling
   const handlePerformDecryption = async () => {
     if (!decryptPassphrase.trim() || !pendingEncryptedData) return;
     try {
@@ -581,7 +613,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       setPendingEncryptedData(null);
       prepareRestore(decrypted);
     } catch (err: any) {
-      setStatusMessage({ type: 'error', text: err.message || '복호화에 실패했습니다.' });
+      let errorText = '복호화에 실패했습니다.';
+      if (err instanceof CryptoBackupError) {
+        if (err.code === 'INVALID_PASSPHRASE') {
+          errorText = '비밀번호가 올바르지 않거나 데이터가 변조되어 인증 태그 검증에 실패했습니다.';
+        } else if (err.code === 'CORRUPTED_PAYLOAD') {
+          errorText = '백업 파일이 손상되었거나 형식이 유효하지 않습니다.';
+        } else if (err.code === 'UNSUPPORTED_VERSION') {
+          errorText = '지원되지 않는 백업 파일 버전입니다.';
+        } else {
+          errorText = err.message;
+        }
+      } else if (err?.message) {
+        errorText = err.message;
+      }
+      setStatusMessage({ type: 'error', text: errorText });
     }
   };
 
@@ -1534,7 +1580,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".json,.enc"
+                    accept=".json,.enc,.vibe.enc"
                     className="hidden"
                     onChange={handleRestoreFile}
                   />
