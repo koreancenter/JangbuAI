@@ -391,4 +391,31 @@ export function sanitizeDebtItemInput<T extends Partial<DebtItem>>(debt: T): T {
   };
 }
 
+// Security Hardening Item #4: Image Upload Pipeline Hardening & Memory Leak / XSS Mitigation
+export {
+  ALLOWED_IMAGE_MIME_TYPES,
+  ALLOWED_IMAGE_EXTENSIONS,
+  BANNED_EXTENSIONS,
+  MAX_RAW_IMAGE_SIZE_BYTES,
+  MAX_IMAGE_DIMENSION,
+  DEFAULT_COMPRESSION_QUALITY,
+  ImageSanitizationError,
+  validateImageFile,
+  sanitizeAndProcessImage,
+  calculateTargetDimensions,
+  verifyImageMagicBytes,
+  containsSvgOrHtmlSignatures,
+  extractImageFileFromClipboard,
+  extractImageFileFromDataTransfer
+} from './imageSanitizer';
+export type {
+  AllowedImageMimeType,
+  ImageSanitizationErrorCode,
+  ImageValidationResult,
+  SanitizationOptions,
+  SanitizedImageMetadata,
+  SanitizedImageOutput
+} from './imageSanitizer';
+
+
 

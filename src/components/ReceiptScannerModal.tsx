@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { 
   Camera, 
   Upload, 
@@ -14,13 +14,23 @@ import {
   AlertCircle,
   KeyRound,
   Settings,
-  Lock
+  Lock,
+  ClipboardPaste,
+  ShieldAlert
 } from 'lucide-react';
 import { ParsedReceiptData, SupportedCurrency } from '../types';
 import { getAIEngineConfig, getCurrencySymbol } from '../utils';
 import { parseReceiptWithResilience } from '../autonomousFinance';
 import { parseReceiptTextLocally } from '../financialParser';
 import { hasSecureGeminiApiKey, getSecureGeminiApiKey, maskApiKey } from '../geminiKeyManager';
+import {
+  sanitizeAndProcessImage,
+  extractImageFileFromClipboard,
+  extractImageFileFromDataTransfer,
+  ImageSanitizationError,
+  SanitizedImageMetadata,
+  MAX_RAW_IMAGE_SIZE_BYTES
+} from '../imageSanitizer';
 
 interface ReceiptScannerModalProps {
   isOpen: boolean;
@@ -31,90 +41,8 @@ interface ReceiptScannerModalProps {
   currentCurrency?: SupportedCurrency;
 }
 
-interface CompressionMetadata {
-  originalKB: number;
-  compressedKB: number;
-  mimeType: 'image/webp' | 'image/jpeg';
-  width: number;
-  height: number;
-}
+type CompressionMetadata = SanitizedImageMetadata;
 
-/**
- * Client-Side Image Pre-processing & Compression:
- * - Downscales large receipts to a maximum of 1280x1280px maintaining aspect ratio.
- * - Draws to HTML5 Canvas, which automatically neutralizes EXIF/orientation metadata.
- * - Encodes to WebP (fallback to JPEG) at 0.8 quality to minimize token usage and latency.
- */
-async function preprocessReceiptImage(file: File): Promise<{
-  base64: string;
-  metadata: CompressionMetadata;
-}> {
-  return new Promise((resolve, reject) => {
-    const originalKB = Math.round(file.size / 1024);
-    const img = new Image();
-    const objectUrl = URL.createObjectURL(file);
-
-    img.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      try {
-        let width = img.naturalWidth || img.width;
-        let height = img.naturalHeight || img.height;
-        const maxDimension = 1280;
-
-        if (width > maxDimension || height > maxDimension) {
-          const ratio = Math.min(maxDimension / width, maxDimension / height);
-          width = Math.round(width * ratio);
-          height = Math.round(height * ratio);
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          throw new Error('Canvas 2D context creation failed');
-        }
-
-        // Draw image onto canvas - strips camera EXIF/GPS metadata and normalizes pixels
-        ctx.drawImage(img, 0, 0, width, height);
-
-        // Attempt WebP encoding first, fallback to JPEG
-        let mimeType: 'image/webp' | 'image/jpeg' = 'image/webp';
-        let dataUrl = canvas.toDataURL('image/webp', 0.8);
-
-        if (!dataUrl.startsWith('data:image/webp')) {
-          mimeType = 'image/jpeg';
-          dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        }
-
-        const base64Index = dataUrl.indexOf(',');
-        const rawBase64 = dataUrl.slice(base64Index + 1);
-        const compressedKB = Math.round((rawBase64.length * 3) / 4 / 1024);
-
-        resolve({
-          base64: dataUrl,
-          metadata: {
-            originalKB,
-            compressedKB,
-            mimeType,
-            width,
-            height
-          }
-        });
-      } catch (err) {
-        reject(err instanceof Error ? err : new Error('이미지 압축 중 오류가 발생했습니다.'));
-      }
-    };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error('이미지 파일을 로드하지 못했습니다. 유효한 사진 파일인지 확인해주세요.'));
-    };
-
-    img.src = objectUrl;
-  });
-}
 
 export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
   isOpen,
@@ -127,6 +55,7 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [compressionMeta, setCompressionMeta] = useState<CompressionMetadata | null>(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryInfo, setRetryInfo] = useState<{ attempt: number; reason: string } | null>(null);
   const [parsedResult, setParsedResult] = useState<ParsedReceiptData | null>(null);
@@ -138,6 +67,7 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
   const [fallbackRawText, setFallbackRawText] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const dragCounterRef = useRef<number>(0);
   const isLight = theme === 'light';
 
   // Monitor network connectivity
@@ -154,39 +84,24 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
     };
   }, []);
 
-  if (!isOpen) return null;
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      processFile(file);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      processFile(file);
-    }
-  };
-
-  const processFile = async (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setError('이미지 파일(JPG, PNG, WebP)만 업로드 가능합니다.');
-      return;
-    }
-
+  // Secure Image Processing & Pixel Re-rasterization Pipeline
+  const processFile = useCallback(async (file: File) => {
     setError(null);
     setParsedResult(null);
     setRetryInfo(null);
     setIsScanning(true);
 
     try {
-      // Step 1: Preprocess & compress image to <= 1280px WebP
-      const { base64, metadata } = await preprocessReceiptImage(file);
-      setImagePreview(base64);
-      setCompressionMeta(metadata);
+      // Step 1: Pre-flight security validation & Canvas2D re-rasterization
+      // Strips polyglots, SVG/XSS scripts, and GPS/EXIF metadata while bounding to <= 1280px
+      const sanitized = await sanitizeAndProcessImage(file, {
+        maxDimension: 1280,
+        quality: 0.8,
+        preferredMime: 'image/webp'
+      });
+
+      setImagePreview(sanitized.dataUrl);
+      setCompressionMeta(sanitized.metadata);
 
       // Step 2: If offline, guide to heuristic fallback
       if (isOffline) {
@@ -197,13 +112,109 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
       }
 
       // Step 3: Run Resilient Receipt Parser with exponential backoff
-      await runAnalysis(base64, metadata.mimeType);
+      await runAnalysis(sanitized.base64, sanitized.mimeType);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : '영수증 이미지 처리 중 문제가 발생했습니다.';
-      setError(message);
       setIsScanning(false);
+      if (err instanceof ImageSanitizationError) {
+        let msg = err.message;
+        if (err.code === 'SVG_XSS_DETECTED') {
+          msg = 'SVG 및 스크립트 벡터 형식은 XSS 보안 방지를 위해 차단되었습니다. 안전한 JPG, PNG, WebP 사진을 사용해주세요.';
+        } else if (err.code === 'FILE_TOO_LARGE') {
+          msg = '파일 용량이 너무 큽니다. 브라우저 안정성을 위해 최대 15MB 이하의 이미지만 업로드 가능합니다.';
+        } else if (err.code === 'DISALLOWED_EXTENSION' || err.code === 'DISALLOWED_MIME_TYPE') {
+          msg = '지원되지 않는 파일 형식입니다. JPG, PNG, WebP 포맷의 이미지만 업로드할 수 있습니다.';
+        } else if (err.code === 'CORRUPTED_MAGIC_HEADER') {
+          msg = '이미지 파일 헤더 검증 실패: 유효한 래스터 사진(JPG, PNG, WebP)인지 확인해주세요.';
+        }
+        setError(msg);
+      } else {
+        const message = err instanceof Error ? err.message : '영수증 이미지 처리 중 문제가 발생했습니다.';
+        setError(message);
+      }
+    }
+  }, [isOffline]);
+
+  // Support clipboard paste (Cmd+V / Ctrl+V) for screenshot uploads
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePaste = (e: ClipboardEvent) => {
+      // Don't intercept paste if user is typing into input or textarea
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      const file = extractImageFileFromClipboard(e);
+      if (file) {
+        e.preventDefault();
+        processFile(file);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('paste', handlePaste);
+    };
+  }, [isOpen, processFile]);
+
+  // Prevent memory leaks on unmount
+  useEffect(() => {
+    return () => {
+      setImagePreview(null);
+      setCompressionMeta(null);
+    };
+  }, []);
+
+  if (!isOpen) return null;
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processFile(file);
     }
   };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDraggingOver(true);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDraggingOver) {
+      setIsDraggingOver(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) {
+      setIsDraggingOver(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+    dragCounterRef.current = 0;
+
+    const file = extractImageFileFromDataTransfer(e.dataTransfer);
+    if (file) {
+      processFile(file);
+    } else {
+      setError('유효한 이미지 파일(JPG, PNG, WebP)을 드래그해주세요. (SVG 및 문서는 보안상 지원되지 않습니다)');
+    }
+  };
+
 
   const runAnalysis = async (base64Image: string, mimeType: string) => {
     setIsScanning(true);
@@ -265,6 +276,8 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
     setRetryInfo(null);
     setShowManualFallback(false);
     setFallbackRawText('');
+    setIsDraggingOver(false);
+    dragCounterRef.current = 0;
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -376,15 +389,31 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
               </div>
             </div>
           ) : error ? (
-            <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs flex items-start justify-between gap-2">
-              <div className="flex items-start gap-2">
-                <AlertCircle size={15} className="shrink-0 mt-0.5" />
-                <span className="leading-relaxed">{error}</span>
+            <div className={`p-3.5 rounded-2xl border text-xs flex items-start justify-between gap-2.5 transition-all ${
+              error.includes('보안') || error.includes('SVG') || error.includes('XSS')
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
+                : 'bg-rose-500/10 border-rose-500/20 text-rose-500'
+            }`}>
+              <div className="flex items-start gap-2.5">
+                {error.includes('보안') || error.includes('SVG') || error.includes('XSS') ? (
+                  <ShieldAlert size={16} className="shrink-0 mt-0.5 text-amber-500" />
+                ) : (
+                  <AlertCircle size={16} className="shrink-0 mt-0.5 text-rose-500" />
+                )}
+                <div className="space-y-0.5">
+                  <p className="font-semibold leading-snug">
+                    {error.includes('보안') || error.includes('SVG') || error.includes('XSS')
+                      ? '보안 차단 안내 (Anti-XSS)'
+                      : '업로드 오류'}
+                  </p>
+                  <p className="leading-relaxed text-[11px] opacity-90">{error}</p>
+                </div>
               </div>
               <button 
                 type="button" 
                 onClick={() => setError(null)} 
-                className="text-sm font-bold text-rose-400 hover:text-rose-600 shrink-0"
+                className="text-sm font-bold opacity-60 hover:opacity-100 shrink-0 p-1"
+                aria-label="오류 메시지 닫기"
               >
                 ×
               </button>
@@ -430,37 +459,53 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
             /* Upload Drop Area */
             <div className="space-y-3">
               <div
-                onDragOver={(e) => e.preventDefault()}
+                onDragEnter={handleDragEnter}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
-                className={`p-8 border-2 border-dashed rounded-3xl text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-3 ${
-                  isLight 
-                    ? 'border-slate-300 hover:border-indigo-500 bg-slate-50/60 hover:bg-indigo-50/20' 
-                    : 'border-white/10 hover:border-[#00F5A0]/40 bg-white/[0.02] hover:bg-white/[0.04]'
+                className={`p-7 border-2 border-dashed rounded-3xl text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-3 relative ${
+                  isDraggingOver
+                    ? isLight
+                      ? 'border-indigo-600 bg-indigo-50/80 ring-4 ring-indigo-500/20 scale-[1.01]'
+                      : 'border-[#00F5A0] bg-[#00F5A0]/10 ring-4 ring-[#00F5A0]/20 scale-[1.01]'
+                    : isLight 
+                      ? 'border-slate-300 hover:border-indigo-500 bg-slate-50/60 hover:bg-indigo-50/20' 
+                      : 'border-white/10 hover:border-[#00F5A0]/40 bg-white/[0.02] hover:bg-white/[0.04]'
                 }`}
               >
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                   capture="environment"
                   onChange={handleFileChange}
                   className="hidden"
                 />
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border shadow-xs ${
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border shadow-xs transition-transform ${
+                  isDraggingOver ? 'scale-110' : ''
+                } ${
                   isLight ? 'bg-white border-slate-200 text-indigo-600' : 'bg-white/[0.05] border-white/10 text-[#00F5A0]'
                 }`}>
-                  <Upload size={22} />
+                  <Upload size={22} className={isDraggingOver ? 'animate-bounce' : ''} />
                 </div>
                 <div>
-                  <p className="text-xs font-bold">영수증 사진 업로드 또는 터치하여 촬영</p>
+                  <p className="text-xs font-bold">
+                    {isDraggingOver ? '여기에 이미지를 놓으세요' : '영수증 사진 업로드 또는 터치하여 촬영'}
+                  </p>
                   <p className={`text-[11px] mt-1 ${isLight ? 'text-slate-500' : 'text-[#94A3B8]'}`}>
-                    드래그 앤 드롭 또는 카메라로 실시간 캡처
+                    드래그 앤 드롭 · 파일 선택 · 클립보드 붙여넣기(Cmd+V)
                   </p>
                 </div>
-                <div className="flex items-center gap-1.5 text-[10px] opacity-75 mt-1">
-                  <ShieldCheck size={12} className="text-emerald-500" />
-                  <span>1280px 자동 최적화 & 위치/EXIF 메타데이터 자동 제거</span>
+                <div className="flex flex-wrap items-center justify-center gap-2 text-[10px] opacity-75 mt-0.5">
+                  <span className="flex items-center gap-1">
+                    <ShieldCheck size={12} className="text-emerald-500" />
+                    <span>1280px 자동 리샘플링</span>
+                  </span>
+                  <span>•</span>
+                  <span>위치/EXIF 제거</span>
+                  <span>•</span>
+                  <span>최대 15MB</span>
                 </div>
               </div>
 

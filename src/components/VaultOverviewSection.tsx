@@ -49,6 +49,13 @@ import {
   AIEngineConfig, 
   getAIEngineConfig 
 } from '../utils';
+import {
+  sanitizeAndProcessImage,
+  extractImageFileFromClipboard,
+  extractImageFileFromDataTransfer,
+  ImageSanitizationError
+} from '../imageSanitizer';
+
 
 interface VaultOverviewSectionProps {
   currentCurrency: SupportedCurrency;
@@ -123,7 +130,9 @@ export const VaultOverviewSection: React.FC<VaultOverviewSectionProps> = ({
   const [scannedResult, setScannedResult] = useState<any | null>(null);
   const [scanPreviewUrl, setScanPreviewUrl] = useState<string | null>(null);
   const [scanTargetAccountId, setScanTargetAccountId] = useState<string>('new');
+  const [isScreenshotDraggingOver, setIsScreenshotDraggingOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const screenshotDragCounterRef = useRef<number>(0);
 
   // New Account Form State
   const [newAccountForm, setNewAccountForm] = useState<{
@@ -327,59 +336,138 @@ export const VaultOverviewSection: React.FC<VaultOverviewSectionProps> = ({
     }
   };
 
-  // Handle Screenshot Upload & Gemini AI Parse
+  // Clipboard Paste listener for Screenshot OCR Modal
+  useEffect(() => {
+    if (!showScanModal) return;
+
+    const handlePaste = (e: ClipboardEvent) => {
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      const file = extractImageFileFromClipboard(e);
+      if (file) {
+        e.preventDefault();
+        processScreenshotFile(file);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('paste', handlePaste);
+    };
+  }, [showScanModal]);
+
+  // Handle Screenshot Upload with Pixel Sanitization & Canvas Downscaling
+  const processScreenshotFile = async (file: File) => {
+    setIsScanning(true);
+    setScannedResult(null);
+
+    try {
+      // Security Hardening Item #4: Canvas2D Re-rasterization (strips EXIF, XSS vectors, and polyglots)
+      const sanitized = await sanitizeAndProcessImage(file, {
+        maxDimension: 1280,
+        quality: 0.8,
+        preferredMime: 'image/webp'
+      });
+
+      setScanPreviewUrl(sanitized.dataUrl);
+
+      const engineConfig = getAIEngineConfig();
+      const res = await fetch('/api/parse-asset-screenshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: sanitized.dataUrl,
+          mimeType: sanitized.mimeType,
+          engineConfig,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error('자산 스크린샷 분석에 실패했습니다.');
+      }
+
+      const data = await res.json();
+      if (data?.asset) {
+        setScannedResult(data.asset);
+        // Try to automatically find matching account
+        const match = accounts.find(
+          (a) =>
+            a.institution.toLowerCase().includes(data.asset.institution.toLowerCase()) ||
+            data.asset.institution.toLowerCase().includes(a.institution.toLowerCase())
+        );
+        if (match) {
+          setScanTargetAccountId(match.id);
+        } else {
+          setScanTargetAccountId('new');
+        }
+      }
+    } catch (err: unknown) {
+      console.error('Scan error:', err);
+      if (err instanceof ImageSanitizationError) {
+        let msg = err.message;
+        if (err.code === 'SVG_XSS_DETECTED') {
+          msg = 'SVG 및 스크립트 벡터 형식은 XSS 보안 방지를 위해 차단되었습니다. 안전한 JPG, PNG, WebP 사진을 사용해주세요.';
+        } else if (err.code === 'FILE_TOO_LARGE') {
+          msg = '파일 용량이 너무 큽니다 (최대 15MB 제한).';
+        }
+        showToast(msg, 'error');
+      } else {
+        showToast(err instanceof Error ? err.message : '스크린샷 OCR 분석 중 오류가 발생했습니다.', 'error');
+      }
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    // Preview
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64Data = reader.result as string;
-      setScanPreviewUrl(base64Data);
-      setIsScanning(true);
-      setScannedResult(null);
-
-      try {
-        const engineConfig = getAIEngineConfig();
-        const res = await fetch('/api/parse-asset-screenshot', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            image: base64Data,
-            mimeType: file.type || 'image/jpeg',
-            engineConfig,
-          }),
-        });
-
-        if (!res.ok) {
-          throw new Error('자산 스크린샷 분석에 실패했습니다.');
-        }
-
-        const data = await res.json();
-        if (data?.asset) {
-          setScannedResult(data.asset);
-          // Try to automatically find matching account
-          const match = accounts.find(
-            (a) =>
-              a.institution.toLowerCase().includes(data.asset.institution.toLowerCase()) ||
-              data.asset.institution.toLowerCase().includes(a.institution.toLowerCase())
-          );
-          if (match) {
-            setScanTargetAccountId(match.id);
-          } else {
-            setScanTargetAccountId('new');
-          }
-        }
-      } catch (err: any) {
-        console.error('Scan error:', err);
-        showToast(err.message || '스크린샷 OCR 분석 중 오류가 발생했습니다.', 'error');
-      } finally {
-        setIsScanning(false);
-      }
-    };
-    reader.readAsDataURL(file);
+    await processScreenshotFile(file);
   };
+
+  const handleScreenshotDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    screenshotDragCounterRef.current += 1;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsScreenshotDraggingOver(true);
+    }
+  };
+
+  const handleScreenshotDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isScreenshotDraggingOver) {
+      setIsScreenshotDraggingOver(true);
+    }
+  };
+
+  const handleScreenshotDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    screenshotDragCounterRef.current = Math.max(0, screenshotDragCounterRef.current - 1);
+    if (screenshotDragCounterRef.current === 0) {
+      setIsScreenshotDraggingOver(false);
+    }
+  };
+
+  const handleScreenshotDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsScreenshotDraggingOver(false);
+    screenshotDragCounterRef.current = 0;
+
+    const file = extractImageFileFromDataTransfer(e.dataTransfer);
+    if (file) {
+      processScreenshotFile(file);
+    } else {
+      showToast('유효한 이미지 파일(JPG, PNG, WebP)만 업로드할 수 있습니다.', 'error');
+    }
+  };
+
 
   // Confirm Scanned Balance Update
   const handleConfirmScannedAsset = async () => {
@@ -987,18 +1075,26 @@ export const VaultOverviewSection: React.FC<VaultOverviewSectionProps> = ({
                 <div className="space-y-4">
                   {/* Upload Drop Zone */}
                   <div
+                    onDragEnter={handleScreenshotDragEnter}
+                    onDragOver={handleScreenshotDragOver}
+                    onDragLeave={handleScreenshotDragLeave}
+                    onDrop={handleScreenshotDrop}
                     onClick={() => fileInputRef.current?.click()}
                     className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-3 ${
-                      isLight
-                        ? 'border-slate-300 hover:border-blue-500 bg-slate-50'
-                        : 'border-white/15 hover:border-blue-500 bg-white/[0.02]'
+                      isScreenshotDraggingOver
+                        ? isLight
+                          ? 'border-blue-600 bg-blue-50/80 ring-4 ring-blue-500/20 scale-[1.01]'
+                          : 'border-blue-400 bg-blue-500/10 ring-4 ring-blue-400/20 scale-[1.01]'
+                        : isLight
+                          ? 'border-slate-300 hover:border-blue-500 bg-slate-50'
+                          : 'border-white/15 hover:border-blue-500 bg-white/[0.02]'
                     }`}
                   >
                     <input
                       type="file"
                       ref={fileInputRef}
                       onChange={handleImageUpload}
-                      accept="image/*"
+                      accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                       className="hidden"
                     />
 
@@ -1009,7 +1105,7 @@ export const VaultOverviewSection: React.FC<VaultOverviewSectionProps> = ({
                           Gemini 3.8 Flash가 계좌 잔고를 분석하고 있습니다...
                         </span>
                         <span className="text-[11px] text-slate-400">
-                          (계좌번호, 개인정보는 자동으로 안전하게 마스킹됩니다)
+                          (1280px 자동 압축 · 위치/EXIF 메타데이터 자동 제거 완료)
                         </span>
                       </div>
                     ) : scanPreviewUrl ? (
@@ -1018,13 +1114,17 @@ export const VaultOverviewSection: React.FC<VaultOverviewSectionProps> = ({
                       </div>
                     ) : (
                       <>
-                        <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-400 flex items-center justify-center">
-                          <UploadCloud size={24} />
+                        <div className={`w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-400 flex items-center justify-center transition-transform ${
+                          isScreenshotDraggingOver ? 'scale-110' : ''
+                        }`}>
+                          <UploadCloud size={24} className={isScreenshotDraggingOver ? 'animate-bounce' : ''} />
                         </div>
                         <div>
-                          <p className="text-xs font-bold">토스증권, 카카오페이증권, 은행 앱 캡처 업로드</p>
+                          <p className="text-xs font-bold">
+                            {isScreenshotDraggingOver ? '여기에 스크린샷을 놓으세요' : '토스증권, 카카오페이증권, 은행 앱 캡처 업로드'}
+                          </p>
                           <p className={`text-[11px] mt-1 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                            포트폴리오 화면, 자산 잔고 화면을 캡처하여 업로드하세요.
+                            드래그 앤 드롭 · 파일 선택 · 클립보드 붙여넣기(Cmd+V) 지원 (최대 15MB)
                           </p>
                         </div>
                       </>
