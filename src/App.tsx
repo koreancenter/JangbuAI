@@ -4,7 +4,7 @@ import {
   inferCategoryAndMerchant,
   extractRealtimePreview
 } from './financialParser';
-import { Transaction, SupportedCurrency, FxRates, ParsedReceiptData } from './types';
+import { Transaction, SupportedCurrency, FxRates, ParsedReceiptData, LaunchScreenMode } from './types';
 import { 
   Settings, 
   Mic, 
@@ -59,6 +59,8 @@ import { CurrencySelectorModal } from './components/CurrencySelectorModal';
 import { ReceiptScannerModal } from './components/ReceiptScannerModal';
 import { SubscriptionManagerSection } from './components/SubscriptionManagerSection';
 import { PredictiveCashflowSection } from './components/PredictiveCashflowSection';
+import { PWAInstallButton, PWAInstallBanner } from './components/PWAInstallButton';
+import { VaultOverviewSection } from './components/VaultOverviewSection';
 
 /**
  * Online Connectivity Hook
@@ -209,6 +211,14 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [activeView, setActiveView] = useState<'stream' | 'ledger' | 'subscriptions' | 'runway'>('stream');
+  const [mainMode, setMainMode] = useState<LaunchScreenMode>('vault');
+
+  // Sync default launch screen preference on mount/change
+  useEffect(() => {
+    if (userPrefs.defaultLaunchScreen) {
+      setMainMode(userPrefs.defaultLaunchScreen);
+    }
+  }, [userPrefs.defaultLaunchScreen]);
 
   // Modal Visibility States
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -513,7 +523,7 @@ export function App() {
   };
 
   return (
-    <div className={`h-[100dvh] w-full max-w-md mx-auto flex flex-col font-sans antialiased relative overflow-hidden shadow-2xl transition-colors duration-200 ${
+    <div className={`h-[100dvh] w-full max-w-md md:max-w-3xl lg:max-w-4xl mx-auto flex flex-col font-sans antialiased relative overflow-hidden shadow-2xl transition-colors duration-200 ${
       isLight ? 'bg-[#F8FAFC] text-slate-900 shadow-slate-300/40' : 'bg-gradient-to-b from-[#0B0F17] via-[#0D1424] to-[#111827] text-slate-100'
     }`}>
       
@@ -526,27 +536,33 @@ export function App() {
       )}
 
       {/* 1. TOP HEADER */}
-      <header className={`flex-none h-16 px-5 flex items-center justify-between backdrop-blur-xl z-20 transition-colors ${
+      <header className={`flex-none h-16 px-4 sm:px-6 flex items-center justify-between backdrop-blur-xl z-20 transition-colors ${
         isLight ? 'bg-white/90 text-slate-900' : 'bg-[#0B0F17]/80 text-white'
       }`}>
-        {/* Left: Brand & Date Label */}
+        {/* Left: Brand & Mode Subtitle */}
         <div className="flex items-center min-w-0">
           <div className="flex flex-col truncate">
-            <h1 className={`text-base font-extrabold tracking-tight truncate ${
-              isLight ? 'text-slate-950' : 'text-white'
-            }`}>
-              Vibe Ledger
-            </h1>
+            <div className="flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${mainMode === 'vault' ? 'bg-blue-500' : 'bg-emerald-400'} animate-pulse`} />
+              <h1 className={`text-base font-extrabold tracking-tight truncate ${
+                isLight ? 'text-slate-950' : 'text-white'
+              }`}>
+                Vibe Vault
+              </h1>
+            </div>
             <span className={`text-xs font-medium truncate ${
               isLight ? 'text-slate-500' : 'text-[#94A3B8]'
             }`}>
-              {format(now, 'yyyy년 M월')} 자산 분석
+              {mainMode === 'vault' ? '프라이빗 자산 금고 & 포트폴리오' : `${format(now, 'yyyy년 M월')} 일일 가계부`}
             </span>
           </div>
         </div>
 
         {/* Right action controls */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* PWA In-App Install Button */}
+          <PWAInstallButton theme={userPrefs.theme || 'dark'} />
+
           {/* Global Currency Switcher */}
           <button
             id="currency-selector-header-btn"
@@ -598,10 +614,58 @@ export function App() {
         </div>
       </header>
 
+      {/* 1.5. PRIMARY MODE TAB SWITCHER: Vault vs Ledger */}
+      <div className={`flex-none px-4 sm:px-6 py-2 border-b backdrop-blur-md flex items-center justify-between gap-2 z-10 transition-colors ${
+        isLight ? 'bg-white/80 border-slate-200/80' : 'bg-[#0B0F17]/60 border-white/5'
+      }`}>
+        <div className={`flex p-1 rounded-2xl border transition-all ${
+          isLight ? 'bg-slate-100/90 border-slate-200' : 'bg-black/40 border-white/5'
+        }`}>
+          <button
+            id="top-mode-vault-btn"
+            type="button"
+            onClick={() => setMainMode('vault')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 ${
+              mainMode === 'vault'
+                ? isLight
+                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200/60'
+                  : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20'
+                : isLight
+                ? 'text-slate-500 hover:text-slate-900'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <ShieldCheck size={14} className={mainMode === 'vault' ? (isLight ? 'text-blue-600' : 'text-blue-200') : 'text-blue-400'} />
+            <span>볼트 (Vault)</span>
+          </button>
+          <button
+            id="top-mode-ledger-btn"
+            type="button"
+            onClick={() => setMainMode('ledger')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 ${
+              mainMode === 'ledger'
+                ? isLight
+                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200/60'
+                  : 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/20'
+                : isLight
+                ? 'text-slate-500 hover:text-slate-900'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Wallet size={14} className={mainMode === 'ledger' ? (isLight ? 'text-emerald-600' : 'text-emerald-200') : 'text-emerald-400'} />
+            <span>가계부 (Ledger)</span>
+          </button>
+        </div>
+
+        <span className={`text-[11px] font-medium hidden sm:block ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>
+          {mainMode === 'vault' ? '다중 증권사 · 거래소 통합 자산' : '일일 지출 추적 및 스마트 예산'}
+        </span>
+      </div>
+
       {/* 2. SCROLLABLE MIDDLE VIEWPORT */}
       <main 
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto px-4 py-4 space-y-4 scrollbar-none"
+        className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4 scrollbar-none"
       >
         {/* Offline Warning Banner */}
         {!isOnline && (
@@ -611,8 +675,20 @@ export function App() {
           </div>
         )}
 
-        {/* PROMINENT "NET BALANCE" HERO SECTION */}
-        <section className={`p-5 rounded-3xl transition-all ${
+        {mainMode === 'vault' ? (
+          /* PRIMARY VAULT MODE: Multi-Brokerage & Net Worth Portfolio */
+          <VaultOverviewSection
+            currentCurrency={currentCurrency}
+            fxRates={fxRates}
+            stealthMode={isStealth}
+            theme={userPrefs.theme || 'dark'}
+            onTransactionAdded={() => loadTransactions()}
+          />
+        ) : (
+          /* PRIMARY LEDGER MODE: Daily Transaction & Budget Tracking */
+          <>
+            {/* PROMINENT "NET BALANCE" HERO SECTION */}
+            <section className={`p-5 rounded-3xl transition-all ${
           isLight 
             ? 'bg-slate-50/70 text-slate-900' 
             : 'bg-white/[0.02] text-white'
@@ -1159,15 +1235,19 @@ export function App() {
             />
           </div>
         )}
+          </>
+        )}
       </main>
 
       {/* 3. FIXED BOTTOM DOCK (AI Omnibar & Mic/Camera Controls) */}
-      <footer className={`flex-none backdrop-blur-xl py-2 px-3 sm:px-4 z-20 transition-colors border-t ${
+      <footer className={`flex-none backdrop-blur-xl py-2 px-3 sm:px-6 z-20 transition-colors border-t ${
         isLight 
           ? 'bg-white/95 border-slate-100 shadow-[0_-4px_20px_rgba(0,0,0,0.03)]' 
           : 'bg-[#0B0F17]/95 border-white/5 shadow-[0_-4px_20px_rgba(0,0,0,0.4)]'
       }`}>
-        {/* Error notification */}
+        {mainMode === 'ledger' ? (
+          <>
+            {/* Error notification */}
         {error && (
           <div className="mb-2 text-xs text-rose-500 bg-rose-500/10 rounded-xl px-3 py-1.5 flex items-center justify-between">
             <span className="truncate">{error}</span>
@@ -1411,6 +1491,63 @@ export function App() {
             </div>
           </div>
         </div>
+          </>
+        ) : (
+          /* Vault Mode Quick Status Bar */
+          <div className="flex items-center justify-between py-1 px-1">
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full animate-pulse ${isLight ? 'bg-blue-600' : 'bg-blue-400'}`} />
+              <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                프라이빗 암호화 자산 볼트
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-slate-400">
+              <ShieldCheck size={13} className="text-blue-400" />
+              <span>로컬 저장소 전용</span>
+            </div>
+          </div>
+        )}
+
+        {/* Persistent Bottom Tab Navigation Switcher (Ergonomic Thumb Access) */}
+        <div className={`pt-2 mt-1.5 flex items-center justify-around border-t ${
+          isLight ? 'border-slate-200/80' : 'border-white/5'
+        }`}>
+          <button
+            id="bottom-nav-vault-btn"
+            type="button"
+            onClick={() => setMainMode('vault')}
+            className={`flex-1 py-1 flex flex-col items-center gap-0.5 rounded-xl transition-all ${
+              mainMode === 'vault'
+                ? isLight
+                  ? 'text-blue-600 font-bold'
+                  : 'text-blue-400 font-bold'
+                : isLight
+                ? 'text-slate-400 hover:text-slate-700'
+                : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            <ShieldCheck size={18} className={mainMode === 'vault' ? 'stroke-[2.5]' : ''} />
+            <span className="text-[11px]">볼트 (자산)</span>
+          </button>
+
+          <button
+            id="bottom-nav-ledger-btn"
+            type="button"
+            onClick={() => setMainMode('ledger')}
+            className={`flex-1 py-1 flex flex-col items-center gap-0.5 rounded-xl transition-all ${
+              mainMode === 'ledger'
+                ? isLight
+                  ? 'text-emerald-600 font-bold'
+                  : 'text-[#00F5A0] font-bold'
+                : isLight
+                ? 'text-slate-400 hover:text-slate-700'
+                : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            <Wallet size={18} className={mainMode === 'ledger' ? 'stroke-[2.5]' : ''} />
+            <span className="text-[11px]">가계부 (지출)</span>
+          </button>
+        </div>
       </footer>
 
       {/* Edit Transaction Modal */}
@@ -1457,6 +1594,12 @@ export function App() {
         onConfirm={handleConfirmReceipt}
         theme={userPrefs.theme || 'dark'}
         currentCurrency={currentCurrency}
+      />
+
+      {/* Automatic In-App PWA Install Banner */}
+      <PWAInstallBanner 
+        theme={userPrefs.theme || 'dark'} 
+        position="bottom" 
       />
     </div>
   );

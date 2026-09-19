@@ -201,6 +201,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [chartPalette, setChartPalette] = useState<ChartPaletteType>('default');
   const [autoCategorization, setAutoCategorization] = useState<boolean>(true);
+  const [defaultLaunchScreen, setDefaultLaunchScreen] = useState<'vault' | 'ledger'>('vault');
 
   // Tab 3: Data & Privacy state
   const [lastExportedDate, setLastExportedDate] = useState<string>('없음');
@@ -250,6 +251,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       setTheme(prefs.theme || 'dark');
       setChartPalette(prefs.chartPalette || 'default');
       setAutoCategorization(prefs.autoCategorization !== undefined ? !!prefs.autoCategorization : true);
+      setDefaultLaunchScreen(prefs.defaultLaunchScreen || 'vault');
 
       // Load last export date from localStorage
       const lastExp = localStorage.getItem('vibe_last_export_date');
@@ -914,6 +916,66 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                   화면 및 테마
                 </span>
                 <div className="space-y-1 px-1">
+                  {/* Row 0: Default Launch Screen Segmented Control */}
+                  <div className="py-2 flex items-center justify-between gap-3">
+                    <div>
+                      <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                        기본 시작 화면
+                      </span>
+                      <span className={`text-[10px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                        앱 실행 시 첫 화면을 지정합니다
+                      </span>
+                    </div>
+                    <div className={`flex p-0.5 rounded-xl border ${
+                      isLight ? 'bg-slate-200/70 border-slate-300/60' : 'bg-black/40 border-white/5'
+                    }`}>
+                      <button
+                        type="button"
+                        id="launch-screen-vault-btn"
+                        onClick={() => {
+                          setDefaultLaunchScreen('vault');
+                          const prefs = getUserPreferences();
+                          saveUserPreferences({ ...prefs, defaultLaunchScreen: 'vault' });
+                          if (onDataChanged) onDataChanged();
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 active:scale-95 ${
+                          defaultLaunchScreen === 'vault'
+                            ? isLight
+                              ? 'bg-white text-slate-950 shadow-xs font-bold'
+                              : 'bg-white/15 text-white shadow-xs font-bold'
+                            : isLight
+                              ? 'text-slate-600 hover:text-slate-900'
+                              : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <ShieldCheck size={12} className="text-blue-400" />
+                        <span>볼트 (Vault)</span>
+                      </button>
+                      <button
+                        type="button"
+                        id="launch-screen-ledger-btn"
+                        onClick={() => {
+                          setDefaultLaunchScreen('ledger');
+                          const prefs = getUserPreferences();
+                          saveUserPreferences({ ...prefs, defaultLaunchScreen: 'ledger' });
+                          if (onDataChanged) onDataChanged();
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 active:scale-95 ${
+                          defaultLaunchScreen === 'ledger'
+                            ? isLight
+                              ? 'bg-white text-slate-950 shadow-xs font-bold'
+                              : 'bg-white/15 text-white shadow-xs font-bold'
+                            : isLight
+                              ? 'text-slate-600 hover:text-slate-900'
+                              : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <Wallet size={12} className="text-emerald-400" />
+                        <span>가계부 (Ledger)</span>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Row 1: Screen Theme (3-way Segmented Control: Dark | Light | System) */}
                   <div className="py-2 flex items-center justify-between gap-3">
                     <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>

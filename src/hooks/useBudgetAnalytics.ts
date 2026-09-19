@@ -141,7 +141,7 @@ export function useBudgetAnalytics({
    * Category breakdown of current month expenses (for CategoryDonutChart)
    */
   const categoryBreakdown = useMemo((): CategoryExpenseBreakdown[] => {
-    const expenses = currentMonthTransactions.filter(t => t.type === 'EXPENSE');
+    const expenses = currentMonthTransactions.filter(t => t.type === 'EXPENSE' && !t.isInternalTransfer);
     const categoryTotals: Record<string, { total: number; count: number }> = {};
     let sum = 0;
 

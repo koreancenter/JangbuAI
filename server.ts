@@ -399,6 +399,166 @@ Requirements:
     }
   });
 
+  // Multimodal Portfolio & Brokerage Screenshot Scanner (Gemini Vision with Structured JSON Schema)
+  app.post('/api/parse-asset-screenshot', async (req, res) => {
+    try {
+      const { image, mimeType = 'image/webp', engineConfig } = req.body;
+      if (!image || typeof image !== 'string') {
+        return res.status(400).json({ error: '계좌/증권 스크린샷 이미지 데이터(Base64)가 필요합니다.' });
+      }
+
+      let apiKey = process.env.GEMINI_API_KEY;
+      if (engineConfig?.engineType === 'byok' && engineConfig?.apiKey && engineConfig?.provider === 'gemini') {
+        apiKey = engineConfig.apiKey;
+      }
+
+      // If no API key or local-only mode, return a smart deterministic demo result
+      if (!apiKey || engineConfig?.engineType === 'local') {
+        return res.json({
+          asset: {
+            institution: '토스증권',
+            accountName: '토스 미국/국내 주식 잔고',
+            assetType: 'BROKERAGE',
+            currentBalance: 12500000,
+            currency: 'KRW',
+            holdings: [
+              { name: 'S&P 500 ETF', valuation: 8000000, profitRate: 12.4 },
+              { name: '빅테크 포트폴리오', valuation: 4500000, profitRate: 8.7 }
+            ],
+            confidenceScore: 0.95,
+            notes: '오프라인/로컬 모드 스캔 완료 (샘플 데이터)'
+          },
+          source: 'local'
+        });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: { 'User-Agent': 'aistudio-build' }
+        }
+      });
+
+      const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  data: base64Data,
+                  mimeType: mimeType || 'image/webp'
+                }
+              },
+              {
+                text: `You are an expert OCR financial portfolio parsing AI for 'Vibe Vault'.
+Analyze this screenshot from a Korean or global financial mobile app (e.g., Toss Securities 토스증권, Kakao Pay Securities 카카오페이증권, Upbit 업비트, KakaoBank 카카오뱅크, Kiwoom 키움증권, Shinhan, KB, Mirae Asset, Chase, Robinhood, etc.).
+
+Extract the financial asset details into structured data:
+1. "institution": The financial institution or broker name (e.g., "토스증권", "카카오페이증권", "업비트", "카카오뱅크", "KB국민은행", "키움증권", "미래에셋증권").
+2. "accountName": The specific account label or title visible (e.g., "해외주식 종합계좌", "국내주식 ISA", "종합매매", "자유입출금 통장", "가상자산 잔고").
+3. "assetType": Strictly one of ["BROKERAGE", "BANK", "CRYPTO", "REAL_ESTATE", "CASH", "LIABILITY"].
+   - Stock/Brokerage apps -> "BROKERAGE"
+   - Bank/checking/savings accounts -> "BANK"
+   - Crypto wallets/exchanges -> "CRYPTO"
+   - Loans/mortgages/liabilities -> "LIABILITY"
+4. "currentBalance": The total account balance or total portfolio evaluated asset value (총 평가금액, 총 자산, 예수금 합산 등) as a pure positive number in base unit (e.g., "1,250만원" or "12,500,000원" -> 12500000, "$4,200.50" -> 4200.5).
+5. "currency": ISO currency code ("KRW", "USD", "EUR", "JPY", "GBP"). Default to "KRW" if Korean won.
+6. "holdings": Optional array of recognized individual holding items/stocks visible on the screen (with "name", "valuation", "quantity", and "profitRate" as percentage number e.g. +14.2% -> 14.2).
+7. "confidenceScore": Extraction confidence score between 0.0 and 1.0.
+8. "notes": Brief summary of parsed asset (e.g. "총 평가자산 12,500,000원 감지됨").
+
+[STRICT PRIVACY RULE]
+Never output full resident identity numbers, personal passwords, or full unmasked account numbers.`
+              }
+            ]
+          }
+        ],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              institution: {
+                type: Type.STRING,
+                description: 'Financial institution name (e.g. 토스증권, 카카오페이증권, 업비트, 카카오뱅크)'
+              },
+              accountName: {
+                type: Type.STRING,
+                description: 'Account title or portfolio name'
+              },
+              assetType: {
+                type: Type.STRING,
+                description: 'BROKERAGE, BANK, CRYPTO, REAL_ESTATE, CASH, or LIABILITY'
+              },
+              currentBalance: {
+                type: Type.NUMBER,
+                description: 'Total evaluated balance or account value as a number'
+              },
+              currency: {
+                type: Type.STRING,
+                description: 'ISO currency code: KRW, USD, EUR, JPY, GBP'
+              },
+              holdings: {
+                type: Type.ARRAY,
+                description: 'List of visible stock/crypto holdings',
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    valuation: { type: Type.NUMBER },
+                    quantity: { type: Type.NUMBER },
+                    profitRate: { type: Type.NUMBER }
+                  },
+                  required: ['name', 'valuation']
+                }
+              },
+              confidenceScore: {
+                type: Type.NUMBER,
+                description: 'Confidence between 0.0 and 1.0'
+              },
+              notes: {
+                type: Type.STRING,
+                description: 'Short explanation of extracted asset'
+              }
+            },
+            required: ['institution', 'accountName', 'assetType', 'currentBalance', 'currency', 'confidenceScore']
+          }
+        }
+      });
+
+      const jsonStr = response.text?.trim() || '{}';
+      const parsed = JSON.parse(jsonStr);
+
+      const validAssetTypes = ['BROKERAGE', 'BANK', 'CRYPTO', 'REAL_ESTATE', 'CASH', 'LIABILITY'];
+      const assetType = validAssetTypes.includes(parsed.assetType) ? parsed.assetType : 'BROKERAGE';
+
+      const asset = {
+        institution: String(parsed.institution || '기타 금융기관').trim(),
+        accountName: String(parsed.accountName || '자산 계좌').trim(),
+        assetType,
+        currentBalance: Math.abs(Number(parsed.currentBalance)) || 0,
+        currency: (['KRW', 'USD', 'EUR', 'JPY', 'GBP'].includes(parsed.currency?.toUpperCase()) ? parsed.currency.toUpperCase() : 'KRW'),
+        holdings: Array.isArray(parsed.holdings) ? parsed.holdings.map((h: any) => ({
+          name: String(h.name || '').trim(),
+          valuation: Math.abs(Number(h.valuation)) || 0,
+          quantity: h.quantity ? Number(h.quantity) : undefined,
+          profitRate: typeof h.profitRate === 'number' ? h.profitRate : undefined,
+        })) : [],
+        confidenceScore: typeof parsed.confidenceScore === 'number' ? Math.min(1, Math.max(0, parsed.confidenceScore)) : 0.95,
+        notes: String(parsed.notes || '').trim()
+      };
+
+      res.json({ asset, source: 'gemini' });
+    } catch (err: any) {
+      console.error('Asset screenshot parse error:', err);
+      res.status(500).json({ error: err.message || '자산 스크린샷 분석 중 오류가 발생했습니다.' });
+    }
+  });
+
   app.post('/api/parse', async (req, res) => {
     try {
       const { prompt: rawPrompt, text, engineConfig } = req.body;
@@ -716,17 +876,32 @@ Output a JSON array of parsed assets.`,
     }
   });
 
+  // Support both /api/* and /vibevault/api/*
+  app.use((req, res, next) => {
+    if (req.url.startsWith('/vibevault/api/')) {
+      req.url = req.url.replace('/vibevault/api/', '/api/');
+    }
+    next();
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
+    app.get('/', (req, res) => {
+      res.redirect('/vibevault/');
+    });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    app.use('/vibevault', express.static(distPath));
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get(['/vibevault', '/vibevault/*'], (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
+    });
+    app.get('*', (req, res) => {
+      res.redirect('/vibevault/');
     });
   }
 

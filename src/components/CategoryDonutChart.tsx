@@ -121,14 +121,14 @@ export const CategoryDonutChart: React.FC<CategoryDonutChartProps> = ({
       .style('transition', 'all 0.2s ease-in-out')
       .on('mouseenter', (event, d) => {
         setHoveredCategory(d.data.category);
-        d3.select(event.currentTarget)
+        d3.select(event.currentTarget as SVGPathElement)
           .transition()
           .duration(150)
           .attr('transform', 'scale(1.04)');
       })
       .on('mouseleave', (event) => {
         setHoveredCategory(null);
-        d3.select(event.currentTarget)
+        d3.select(event.currentTarget as SVGPathElement)
           .transition()
           .duration(150)
           .attr('transform', 'scale(1)');

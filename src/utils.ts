@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { Asset, AssetType, ChartPaletteType, SupportedCurrency, FxRates } from './types';
+import { Asset, AssetType, AssetCategoryType, LaunchScreenMode, ChartPaletteType, SupportedCurrency, FxRates } from './types';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -23,6 +23,7 @@ export interface UserPreferences {
   theme: ThemeMode;       // 'dark' | 'light' | 'system'
   chartPalette?: ChartPaletteType; // 'default' | 'sage' | 'clay' | 'burgundy'
   autoCategorization: boolean; // toggle smart auto-categorization (default true)
+  defaultLaunchScreen?: LaunchScreenMode; // 'vault' | 'ledger'
 }
 
 export function getAIEngineConfig(): AIEngineConfig {
@@ -102,6 +103,7 @@ export function getUserPreferences(): UserPreferences {
           ? parsed.chartPalette 
           : 'default',
         autoCategorization: parsed.autoCategorization !== undefined ? !!parsed.autoCategorization : true,
+        defaultLaunchScreen: (parsed.defaultLaunchScreen === 'ledger' ? 'ledger' : 'vault'),
       };
     }
   } catch (e) {}
@@ -113,11 +115,25 @@ export function getUserPreferences(): UserPreferences {
     theme: 'dark',
     chartPalette: 'default',
     autoCategorization: true,
+    defaultLaunchScreen: 'vault',
   };
 }
 
 export function saveUserPreferences(prefs: UserPreferences) {
   localStorage.setItem('vibe_user_preferences', JSON.stringify(prefs));
+}
+
+export const ASSET_CATEGORY_NAMES_KO: Record<AssetCategoryType, string> = {
+  BROKERAGE: '증권/투자',
+  BANK: '은행/예적금',
+  CRYPTO: '가상자산',
+  REAL_ESTATE: '부동산/실물',
+  CASH: '현금/비상금',
+  LIABILITY: '부채/대출',
+};
+
+export function getAssetCategoryKo(type: AssetCategoryType): string {
+  return ASSET_CATEGORY_NAMES_KO[type] || '기타 자산';
 }
 
 export interface CategoryItem {
@@ -223,6 +239,16 @@ export const CURRENCY_SYMBOLS: Record<string, string> = {
 
 export function getCurrencySymbol(code: string): string {
   return CURRENCY_SYMBOLS[code] || code;
+}
+
+export function formatCurrency(amount: number, currency: string = 'KRW'): string {
+  const symbol = getCurrencySymbol(currency);
+  const isNegative = amount < 0;
+  const absVal = Math.abs(amount);
+  const formattedVal = (currency === 'KRW' || currency === 'JPY')
+    ? Math.round(absVal).toLocaleString()
+    : absVal.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return `${isNegative ? '-' : ''}${symbol}${formattedVal}`;
 }
 
 // Default Fallback FX Rates table (KRW base)

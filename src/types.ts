@@ -1,5 +1,31 @@
 export type AssetType = 'CARD' | 'BANK' | 'CASH' | 'OTHER';
 
+// Multi-Brokerage & Comprehensive Asset Classification
+export type AssetCategoryType = 'BROKERAGE' | 'BANK' | 'CRYPTO' | 'REAL_ESTATE' | 'CASH' | 'LIABILITY';
+
+export type LaunchScreenMode = 'vault' | 'ledger';
+
+export interface HoldingItem {
+  name: string;
+  valuation: number;
+  currency?: string;
+  quantity?: number;
+  profitRate?: number; // e.g. +14.2% -> 14.2
+}
+
+export interface AssetAccount {
+  id: string;
+  institution: string; // e.g., 'Toss Securities', 'Kakao Pay Securities', 'KakaoBank', 'Manual'
+  accountName: string; // e.g., 'Toss US Stock', 'Kakao Domestic ISA'
+  assetType: AssetCategoryType;
+  currentBalance: number;
+  currency: string; // 'KRW', 'USD', etc.
+  lastUpdated: string; // ISO date
+  note?: string;
+  accountNumberMasked?: string;
+  holdings?: HoldingItem[];
+}
+
 export type TransactionType = 'INCOME' | 'EXPENSE' | 'TRANSFER' | 'SETTLEMENT';
 export type SupportedCurrency = 'KRW' | 'USD' | 'EUR' | 'JPY' | 'GBP';
 export type CurrencyCode = SupportedCurrency | string;
@@ -32,6 +58,9 @@ export interface Transaction {
   groupId?: string; // Links related multi-part expenses or Dutch-pay settlements
   originalTotal?: number; // Pre-settlement original sum if applicable
   convertedAmount?: number; // Normalized to current base currency if different
+  sourceAccountId?: string; // Source account for account-to-account transfer
+  targetAccountId?: string; // Destination account for account-to-account transfer
+  isInternalTransfer?: boolean; // Transfer between user's own accounts
 }
 
 export interface CategoryBudget {
@@ -134,4 +163,5 @@ export interface UnencryptedBackupPayloadV2 {
   preferences?: Record<string, any>;
   subscriptions?: SubscriptionItem[];
   assets?: Asset[];
+  assetAccounts?: AssetAccount[];
 }

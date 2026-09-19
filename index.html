@@ -2,6 +2,16 @@
 <html lang="ko">
   <head>
     <script>
+      // Early capture of beforeinstallprompt event before framework loads
+      window.deferredPWAInstallPrompt = null;
+      window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        window.deferredPWAInstallPrompt = e;
+        if (typeof window.dispatchPWAInstallEvent === 'function') {
+          window.dispatchPWAInstallEvent(e);
+        }
+      });
+
       // Gracefully prevent [vite] websocket connection failure logs in sandboxed iframe environments
       (function() {
         if (typeof window === 'undefined') return;
@@ -97,19 +107,21 @@
     </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vibe Ledger AI</title>
-    <meta name="description" content="자연어로 간편하게 기록하는 스마트 개인 금융 가계부" />
-    <meta property="og:title" content="Vibe Ledger AI" />
-    <meta property="og:description" content="자연어로 간편하게 기록하는 스마트 개인 금융 가계부" />
+    <title>Vibe Vault</title>
+    <meta name="description" content="A privacy-first, local-encrypted asset vault and multi-brokerage portfolio dashboard (with built-in daily expense ledger)" />
+    <meta property="og:title" content="Vibe Vault" />
+    <meta property="og:description" content="A privacy-first, local-encrypted asset vault and multi-brokerage portfolio dashboard (with built-in daily expense ledger)" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="theme-color" content="#0B0F17" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="VibeLedger" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <meta name="apple-mobile-web-app-title" content="VibeVault" />
+    <link rel="manifest" href="/vibevault/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/vibevault/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/vibevault/icon.svg" />
+    <link rel="alternate icon" href="/vibevault/pwa-192x192.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
