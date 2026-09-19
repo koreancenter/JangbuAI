@@ -11,17 +11,22 @@ import {
   RefreshCw, 
   Image as ImageIcon,
   ShieldCheck,
-  AlertCircle
+  AlertCircle,
+  KeyRound,
+  Settings,
+  Lock
 } from 'lucide-react';
 import { ParsedReceiptData, SupportedCurrency } from '../types';
 import { getAIEngineConfig, getCurrencySymbol } from '../utils';
 import { parseReceiptWithResilience } from '../autonomousFinance';
 import { parseReceiptTextLocally } from '../financialParser';
+import { hasSecureGeminiApiKey, getSecureGeminiApiKey, maskApiKey } from '../geminiKeyManager';
 
 interface ReceiptScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: (receipt: ParsedReceiptData) => void;
+  onOpenSettings?: (tab?: 'assets' | 'engine' | 'preferences' | 'privacy') => void;
   theme?: 'dark' | 'light';
   currentCurrency?: SupportedCurrency;
 }
@@ -115,6 +120,7 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
   isOpen,
   onClose,
   onConfirm,
+  onOpenSettings,
   theme = 'dark',
   currentCurrency = 'KRW'
 }) => {
@@ -224,7 +230,6 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
       setParsedResult(result.receipt);
       setSourceType(result.source);
     } catch (err: unknown) {
-      console.error('Receipt parse failure:', err);
       const message = err instanceof Error ? err.message : '영수증 분석 중 문제가 발생했습니다.';
       setError(message);
       // Automatically reveal manual fallback so user is not blocked
@@ -323,7 +328,54 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
 
         {/* Content Body */}
         <div className="p-5 overflow-y-auto space-y-4 flex-1">
-          {error && (
+          {/* Actionable API Key Guidance Card for Missing or Invalid Keys */}
+          {error && (error.includes('API_KEY_REQUIRED') || error.includes('INVALID_API_KEY')) ? (
+            <div className={`p-4 rounded-2xl border flex flex-col gap-3 animate-in fade-in duration-200 ${
+              isLight ? 'bg-amber-50/90 border-amber-200 text-amber-900' : 'bg-amber-950/30 border-amber-500/30 text-amber-200'
+            }`}>
+              <div className="flex items-start gap-2.5">
+                <KeyRound size={18} className="text-amber-500 shrink-0 mt-0.5" />
+                <div className="text-xs space-y-1">
+                  <p className="font-bold text-sm">
+                    {error.includes('INVALID_API_KEY') ? 'Gemini API 키 인증 실패' : 'Gemini API 키 등록 필요'}
+                  </p>
+                  <p className="leading-relaxed opacity-90 text-[11px]">
+                    클라우드 AI 영수증 인식을 위해 개인 Google Gemini API 키(BYOK)가 필요합니다. Google AI Studio에서 무료로 발급받아 기기에만 안전하게 보관할 수 있습니다.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                {onOpenSettings && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenSettings('engine');
+                    }}
+                    className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-xs"
+                  >
+                    <Settings size={13} />
+                    <span>설정에서 API 키 등록하기</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError(null);
+                    setShowManualFallback(true);
+                  }}
+                  className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all active:scale-95 ${
+                    isLight 
+                      ? 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300' 
+                      : 'bg-white/10 hover:bg-white/15 text-white border-white/10'
+                  }`}
+                >
+                  텍스트 직접 입력
+                </button>
+              </div>
+            </div>
+          ) : error ? (
             <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs flex items-start justify-between gap-2">
               <div className="flex items-start gap-2">
                 <AlertCircle size={15} className="shrink-0 mt-0.5" />
@@ -336,6 +388,30 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
               >
                 ×
               </button>
+            </div>
+          ) : null}
+
+          {/* Gentle BYOK key hint if no key is configured */}
+          {!imagePreview && !hasSecureGeminiApiKey() && !isOffline && (
+            <div className={`px-3.5 py-2.5 rounded-2xl border flex items-center justify-between gap-2 ${
+              isLight ? 'bg-slate-50 border-slate-200 text-slate-600' : 'bg-white/[0.02] border-white/5 text-slate-400'
+            }`}>
+              <span className="text-[11px] flex items-center gap-1.5">
+                <KeyRound size={12} className="text-emerald-500 shrink-0" />
+                <span>개인 Gemini API 키를 등록하면 고정밀 AI Vision 인식이 동작합니다.</span>
+              </span>
+              {onOpenSettings && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenSettings('engine');
+                  }}
+                  className="text-[11px] font-bold text-emerald-500 hover:text-emerald-400 shrink-0 underline underline-offset-2"
+                >
+                  키 등록
+                </button>
+              )}
             </div>
           )}
 

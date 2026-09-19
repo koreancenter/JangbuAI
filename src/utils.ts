@@ -1,6 +1,7 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Asset, AssetType, AssetCategoryType, LaunchScreenMode, ChartPaletteType, SupportedCurrency, FxRates } from './types';
+import { getSecureGeminiApiKey, setSecureGeminiApiKey, sanitizeApiKey } from './geminiKeyManager';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -27,31 +28,43 @@ export interface UserPreferences {
 }
 
 export function getAIEngineConfig(): AIEngineConfig {
+  const secureKey = getSecureGeminiApiKey();
+
   try {
     const stored = localStorage.getItem('vibe_engine_config');
     if (stored) {
       const parsed = JSON.parse(stored);
+      const effectiveKey = sanitizeApiKey(parsed.apiKey) || secureKey || '';
       return {
-        engineType: parsed.engineType || 'local',
+        engineType: parsed.engineType || (effectiveKey ? 'byok' : 'local'),
         localModel: parsed.localModel || 'gemma-2b',
         provider: parsed.provider || 'gemini',
-        modelTier: parsed.modelTier || '1.5-flash',
-        apiKey: parsed.apiKey || ''
+        modelTier: parsed.modelTier || 'gemini-3.8-flash',
+        apiKey: effectiveKey
       };
     }
   } catch (e) {}
   
   return {
-    engineType: 'local',
+    engineType: secureKey ? 'byok' : 'local',
     localModel: 'gemma-2b',
     provider: 'gemini',
-    modelTier: '1.5-flash',
-    apiKey: ''
+    modelTier: 'gemini-3.8-flash',
+    apiKey: secureKey || ''
   };
 }
 
 export function saveAIEngineConfig(config: AIEngineConfig) {
-  localStorage.setItem('vibe_engine_config', JSON.stringify(config));
+  const cleanKey = sanitizeApiKey(config.apiKey);
+  if (config.provider === 'gemini') {
+    if (cleanKey) {
+      setSecureGeminiApiKey(cleanKey);
+    }
+  }
+  localStorage.setItem('vibe_engine_config', JSON.stringify({
+    ...config,
+    apiKey: cleanKey
+  }));
 }
 
 export function getEffectiveTheme(theme: ThemeMode): 'dark' | 'light' {

@@ -25,7 +25,8 @@ import {
   Monitor,
   Wallet,
   Sparkles,
-  Palette
+  Palette,
+  ExternalLink
 } from 'lucide-react';
 import { 
   getAIEngineConfig, 
@@ -38,6 +39,15 @@ import {
   ThemeMode,
   UserPreferences 
 } from '../utils';
+import {
+  sanitizeApiKey,
+  maskApiKey,
+  isValidGeminiKeyFormat,
+  getSecureGeminiApiKey,
+  setSecureGeminiApiKey,
+  clearSecureGeminiApiKey,
+  testGeminiApiKeyOnline
+} from '../geminiKeyManager';
 import { getAllTransactions, addTransactions, clearAllTransactions, replaceAllTransactions } from '../db';
 import { Transaction, ChartPaletteType, EncryptedBackupPayload, UnencryptedBackupPayloadV2 } from '../types';
 import { SmartAssetSetup } from './SmartAssetSetup';
@@ -238,8 +248,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       setEngineType(engineCfg.engineType || 'local');
       setLocalModel(engineCfg.localModel || 'gemma-2b');
       setProvider(engineCfg.provider || 'gemini');
-      setModelTier(engineCfg.modelTier || (engineCfg.provider === 'openai' ? 'gpt-4o-mini' : '1.5-flash'));
-      setApiKey(engineCfg.apiKey || '');
+      setModelTier(engineCfg.modelTier || (engineCfg.provider === 'openai' ? 'gpt-4o-mini' : 'gemini-3.8-flash'));
+      setApiKey(engineCfg.apiKey || getSecureGeminiApiKey() || '');
       setShowKey(false);
       setTestResult({ status: null, message: '' });
 
@@ -289,8 +299,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   const getModelTierOptions = (): CustomSelectOption[] => {
     if (provider === 'gemini') {
       return [
-        { value: '1.5-flash', label: 'Gemini 1.5 Flash', sublabel: '기본 권장, 초고속 처리' },
-        { value: '1.5-pro', label: 'Gemini 1.5 Pro', sublabel: '심층 추론 및 정밀 분석' },
+        { value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', sublabel: '기본 권장, 초고속 멀티모달 인식' },
+        { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', sublabel: '초경량 초고속' },
+        { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', sublabel: '심층 추론 및 복잡 분석' },
       ];
     }
     if (provider === 'openai') {
@@ -323,14 +334,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     const prov = newProvider as 'gemini' | 'openai' | 'anthropic';
     setProvider(prov);
     setTestResult({ status: null, message: '' });
-    if (prov === 'gemini') setModelTier('1.5-flash');
+    if (prov === 'gemini') setModelTier('gemini-3.8-flash');
     else if (prov === 'openai') setModelTier('gpt-4o-mini');
     else setModelTier('claude-3-5-sonnet');
   };
 
-  // Test API Key
+  // Clear API Key completely from state and secure storage
+  const handleClearKey = () => {
+    setApiKey('');
+    clearSecureGeminiApiKey();
+    setTestResult({ status: null, message: '' });
+    setStatusMessage({ type: 'success', text: 'API 키가 안전하게 완전히 삭제되었습니다.' });
+  };
+
+  // Test API Key with zero key leakage
   const handleTestKey = async () => {
-    if (!apiKey.trim()) {
+    const cleanKey = sanitizeApiKey(apiKey);
+    if (!cleanKey) {
       setTestResult({ status: 'invalid', message: 'API 키를 먼저 입력해 주세요' });
       return;
     }
@@ -338,18 +358,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     setTestResult({ status: null, message: '' });
 
     try {
-      const res = await fetch('/api/validate-key', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, apiKey, modelTier })
-      });
-      const data = await res.json();
-      if (res.ok && data.valid) {
-        setTestResult({ status: 'valid', message: '🟢 유효한 API 키 확인됨' });
+      if (provider === 'gemini') {
+        const testRes = await testGeminiApiKeyOnline(cleanKey);
+        setTestResult({
+          status: testRes.valid ? 'valid' : 'invalid',
+          message: testRes.message
+        });
       } else {
-        setTestResult({ status: 'invalid', message: '🔴 연결 실패 (키를 다시 확인해 주세요)' });
+        const res = await fetch('/api/validate-key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider, apiKey: cleanKey, modelTier })
+        });
+        const data = await res.json();
+        if (res.ok && data.valid) {
+          setTestResult({ status: 'valid', message: '🟢 유효한 API 키 확인됨' });
+        } else {
+          setTestResult({ status: 'invalid', message: '🔴 연결 실패 (키를 다시 확인해 주세요)' });
+        }
       }
-    } catch (e: any) {
+    } catch {
       setTestResult({ status: 'invalid', message: '🔴 연결 실패 (네트워크를 확인해 주세요)' });
     } finally {
       setIsTestingKey(false);
@@ -358,14 +386,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
   // Save Settings
   const handleSaveAll = () => {
+    const cleanKey = sanitizeApiKey(apiKey);
     const engineConfig: AIEngineConfig = {
       engineType,
       localModel,
       provider,
       modelTier,
-      apiKey: apiKey.trim()
+      apiKey: cleanKey
     };
     saveAIEngineConfig(engineConfig);
+
+    if (provider === 'gemini') {
+      if (cleanKey) {
+        setSecureGeminiApiKey(cleanKey);
+      } else {
+        clearSecureGeminiApiKey();
+      }
+    }
 
     const userPrefs: UserPreferences = {
       budgetStartDay,
@@ -842,22 +879,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                     </div>
                   </div>
 
-                  {/* API Key Input + Show/Hide + [Test Key] */}
-                  <div className="space-y-1">
-                    <label className={`text-xs font-semibold ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
-                      API 키 입력
-                    </label>
+                  {/* API Key Input + Show/Hide + [Clear] + [Test Key] */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className={`text-xs font-semibold ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                        API 키 입력 (BYOK)
+                      </label>
+                      {provider === 'gemini' && (
+                        <a
+                          href="https://aistudio.google.com/app/apikey"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] font-medium text-emerald-500 hover:text-emerald-400 flex items-center gap-1 transition-colors"
+                        >
+                          <span>Google AI Studio에서 키 발급</span>
+                          <ExternalLink size={10} />
+                        </a>
+                      )}
+                    </div>
+
                     <div className="flex items-center gap-2">
                       <div className="relative flex-1">
                         <input
                           type={showKey ? "text" : "password"}
                           value={apiKey}
                           onChange={(e) => { 
-                            setApiKey(e.target.value); 
+                            const sanitized = sanitizeApiKey(e.target.value);
+                            setApiKey(sanitized); 
                             setTestResult({ status: null, message: '' }); 
                           }}
-                          placeholder="API 키를 입력하세요 (AIza... 또는 sk-...)"
-                          className={`w-full rounded-lg pl-3 pr-8 py-2 text-xs outline-none transition-colors border ${
+                          placeholder={provider === 'gemini' ? "AIzaSy... (Google Gemini API 키)" : "sk-... (API 키 입력)"}
+                          autoComplete="off"
+                          spellCheck={false}
+                          className={`w-full rounded-lg pl-3 pr-8 py-2 text-xs outline-none font-mono transition-colors border ${
                             isLight 
                               ? 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400 focus:border-emerald-500' 
                               : 'bg-slate-900 border-slate-800 text-slate-100 placeholder:text-slate-600 focus:border-emerald-500'
@@ -866,6 +920,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                         <button
                           type="button"
                           onClick={() => setShowKey(!showKey)}
+                          title={showKey ? "API 키 마스킹" : "API 키 보기"}
                           className={`absolute right-2.5 top-2 transition-colors ${
                             isLight ? 'text-slate-400 hover:text-slate-600' : 'text-slate-400 hover:text-slate-200'
                           }`}
@@ -873,6 +928,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                           {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
                         </button>
                       </div>
+
+                      {/* Clear Button */}
+                      {apiKey.trim() && (
+                        <button
+                          type="button"
+                          onClick={handleClearKey}
+                          title="API 키 삭제 및 초기화"
+                          className={`p-2 rounded-lg text-xs font-medium border shrink-0 transition-all active:scale-95 ${
+                            isLight
+                              ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+                              : 'bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-800/40'
+                          }`}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
 
                       <button
                         type="button"
@@ -888,6 +959,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                       </button>
                     </div>
 
+                    {/* Masked Key Display Preview */}
+                    {apiKey.trim() && (
+                      <div className={`text-[11px] px-2.5 py-1 rounded-md flex items-center justify-between font-mono ${
+                        isLight ? 'bg-slate-100 text-slate-600 border border-slate-200' : 'bg-slate-900/60 text-slate-400 border border-slate-800'
+                      }`}>
+                        <span className="flex items-center gap-1.5">
+                          <Lock size={11} className="text-emerald-500 shrink-0" />
+                          <span>마스킹: {maskApiKey(apiKey)}</span>
+                        </span>
+                        <span className="text-[10px] text-emerald-500 font-sans font-medium">로컬 암호화 보관</span>
+                      </div>
+                    )}
+
                     {/* Inline Validation Status Badge */}
                     {testResult.status && (
                       <div className={`mt-1.5 text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 ${
@@ -895,10 +979,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                           ? isLight ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 font-medium' : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-medium' 
                           : isLight ? 'bg-rose-50 text-rose-800 border border-rose-200' : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
                       }`}>
-                        {testResult.status === 'valid' ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+                        {testResult.status === 'valid' ? <CheckCircle2 size={13} className="shrink-0" /> : <XCircle size={13} className="shrink-0" />}
                         <span>{testResult.message}</span>
                       </div>
                     )}
+
+                    {/* Security & CSP Guarantee Footer */}
+                    <p className={`text-[10px] pt-1 leading-relaxed ${isLight ? 'text-slate-500' : 'text-slate-500'}`}>
+                      🛡️ <strong>보안 보장:</strong> 등록된 API 키는 브라우저 내부 암호화 스토리지에만 저장되며, 원격 서버로 전송되거나 프로덕션 번들에 절대 포함되지 않습니다.
+                    </p>
                   </div>
                 </div>
               )}

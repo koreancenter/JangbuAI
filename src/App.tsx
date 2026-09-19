@@ -224,6 +224,7 @@ export function App() {
 
   // Modal Visibility States
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'assets' | 'engine' | 'preferences' | 'privacy'>('assets');
   const [isCurrencyModalOpen, setIsCurrencyModalOpen] = useState(false);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -255,7 +256,10 @@ export function App() {
   const handleOpenReceiptModal = useCallback(() => setIsReceiptModalOpen(true), []);
   const handleCloseReceiptModal = useCallback(() => setIsReceiptModalOpen(false), []);
 
-  const handleOpenSettingsModal = useCallback(() => setIsSettingsOpen(true), []);
+  const handleOpenSettingsModal = useCallback((tab: 'assets' | 'engine' | 'preferences' | 'privacy' = 'assets') => {
+    setSettingsInitialTab(tab);
+    setIsSettingsOpen(true);
+  }, []);
   const handleCloseSettingsModal = useCallback(() => {
     setIsSettingsOpen(false);
     syncPreferences();
@@ -1611,6 +1615,7 @@ export function App() {
         onClose={handleCloseSettingsModal}
         onDataChanged={syncPreferences}
         onDataReset={loadTransactions}
+        initialTab={settingsInitialTab}
       />
 
       {/* Global Currency Selector Modal */}
@@ -1628,6 +1633,7 @@ export function App() {
         isOpen={isReceiptModalOpen}
         onClose={handleCloseReceiptModal}
         onConfirm={handleConfirmReceipt}
+        onOpenSettings={(tab) => handleOpenSettingsModal(tab || 'engine')}
         theme={userPrefs.theme || 'dark'}
         currentCurrency={currentCurrency}
       />

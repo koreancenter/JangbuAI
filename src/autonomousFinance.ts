@@ -25,6 +25,12 @@ import {
   executeReceivableRecovery 
 } from './db';
 import { convertCurrency, AIEngineConfig } from './utils';
+import {
+  getSecureGeminiApiKey,
+  sanitizeApiKey,
+  redactSensitiveKey,
+  directGeminiReceiptOCR
+} from './geminiKeyManager';
 import { 
   format, 
   parseISO, 
@@ -484,45 +490,92 @@ export async function parseReceiptWithResilience(
     throw new Error('OFFLINE: 현재 오프라인 상태입니다. 영수증 텍스트 직접 입력 모드를 사용해주세요.');
   }
 
+  // 2. Pre-flight API Key & Engine Config Resolution
+  const resolvedConfig = (engineConfig as Partial<AIEngineConfig> | undefined) || {};
+  const effectiveApiKey = sanitizeApiKey(resolvedConfig.apiKey) || getSecureGeminiApiKey() || '';
+  const effectiveConfig: AIEngineConfig = {
+    engineType: resolvedConfig.engineType || (effectiveApiKey ? 'byok' : 'local'),
+    localModel: resolvedConfig.localModel || 'gemma-2b',
+    provider: resolvedConfig.provider || 'gemini',
+    modelTier: resolvedConfig.modelTier || 'gemini-3.8-flash',
+    apiKey: effectiveApiKey
+  };
+
+  // If BYOK is active and no key is configured anywhere, fail early with user-friendly actionable prompt
+  if (effectiveConfig.engineType === 'byok' && !effectiveApiKey) {
+    if (rawFallbackText.trim()) {
+      const fallbackData = parseReceiptTextLocally(rawFallbackText, defaultCurrency);
+      return {
+        receipt: fallbackData,
+        source: 'local_fallback',
+        attempts: 0
+      };
+    }
+    throw new Error('API_KEY_REQUIRED: 클라우드 AI 영수증 인식을 위해 Gemini API 키가 필요합니다. 설정에서 API 키를 등록해주세요.');
+  }
+
   let attempt = 0;
   let lastError: Error | null = null;
 
   while (attempt < maxRetries) {
     attempt++;
     try {
-      const res = await fetch('/api/parse-receipt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: imageBase64,
-          mimeType,
-          engineConfig
-        })
-      });
+      let data: any = null;
 
-      // Handle Rate Limit (HTTP 429) or Server Unavailable (500/502/503/504)
-      if (res.status === 429 || res.status >= 500) {
-        const errorText = await res.text().catch(() => '');
-        const isRateLimit = res.status === 429;
-        const reason = isRateLimit ? 'API 사용량 제한 (Rate Limit 429)' : `서버 일시 오류 (${res.status})`;
+      try {
+        const res = await fetch('/api/parse-receipt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: imageBase64,
+            mimeType,
+            engineConfig: effectiveConfig
+          })
+        });
 
-        if (attempt < maxRetries) {
-          // Exponential backoff: base 1000ms * 2^(attempt-1) + jitter
-          const delayMs = Math.min(5000, 1000 * Math.pow(2, attempt - 1) + Math.random() * 300);
-          onRetry?.(attempt, delayMs, reason);
-          await new Promise(resolve => setTimeout(resolve, delayMs));
-          continue;
+        // Check for 401/403 Invalid API key
+        if (res.status === 401 || res.status === 403) {
+          throw new Error('INVALID_API_KEY: 등록된 Gemini API 키 인증에 실패했습니다 (만료 또는 권한 없음). 설정에서 키를 확인해주세요.');
         }
 
-        throw new Error(`${reason}: 영수증 분석에 실패했습니다. (${errorText || '응답 없음'})`);
-      }
+        // Handle Rate Limit (HTTP 429) or Server Unavailable (500/502/503/504)
+        if (res.status === 429 || res.status >= 500) {
+          const errorText = await res.text().catch(() => '');
+          const isRateLimit = res.status === 429;
+          const reason = isRateLimit ? 'API 사용량 제한 (Rate Limit 429)' : `서버 일시 오류 (${res.status})`;
 
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `영수증 인식 실패 (HTTP ${res.status})`);
-      }
+          if (attempt < maxRetries) {
+            const delayMs = Math.min(5000, 1000 * Math.pow(2, attempt - 1) + Math.random() * 300);
+            onRetry?.(attempt, delayMs, reason);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            continue;
+          }
 
-      const data = await res.json();
+          throw new Error(`${reason}: 영수증 분석에 실패했습니다. (${redactSensitiveKey(errorText, effectiveApiKey) || '응답 없음'})`);
+        }
+
+        if (res.ok) {
+          data = await res.json();
+        } else if (res.status === 404 && effectiveApiKey) {
+          // Cloudflare Pages static environment where /api is not present: direct BYOK Gemini API call
+          data = await directGeminiReceiptOCR(imageBase64, mimeType, effectiveApiKey, defaultCurrency as SupportedCurrency);
+        } else {
+          const errJson = await res.json().catch(() => ({}));
+          throw new Error(errJson.error || `영수증 인식 실패 (HTTP ${res.status})`);
+        }
+      } catch (fetchErr: unknown) {
+        const errStr = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        if (errStr.includes('API_KEY_REQUIRED') || errStr.includes('INVALID_API_KEY')) {
+          throw fetchErr;
+        }
+
+        // If backend fetch failed with network/404 on static hosting, attempt direct client-side OCR
+        if (effectiveApiKey && (errStr.includes('Failed to fetch') || errStr.includes('404') || errStr.includes('NetworkError'))) {
+          data = await directGeminiReceiptOCR(imageBase64, mimeType, effectiveApiKey, defaultCurrency as SupportedCurrency);
+        } else {
+          throw fetchErr;
+        }
+      }
       if (!data.receipt) {
         throw new Error('유효한 영수증 데이터 구조가 반환되지 않았습니다.');
       }
@@ -567,10 +620,15 @@ export async function parseReceiptWithResilience(
         attempts: attempt
       };
     } catch (err: unknown) {
-      lastError = err instanceof Error ? err : new Error(String(err));
+      const errStr = err instanceof Error ? err.message : String(err);
+      if (errStr.includes('API_KEY_REQUIRED') || errStr.includes('INVALID_API_KEY')) {
+        throw err;
+      }
+      const safeMsg = redactSensitiveKey(errStr, effectiveApiKey);
+      lastError = new Error(safeMsg);
       if (attempt < maxRetries) {
         const delayMs = Math.min(5000, 1000 * Math.pow(2, attempt - 1) + Math.random() * 300);
-        onRetry?.(attempt, delayMs, lastError.message || '네트워크 재시도');
+        onRetry?.(attempt, delayMs, safeMsg || '네트워크 재시도');
         await new Promise(resolve => setTimeout(resolve, delayMs));
       }
     }
@@ -659,19 +717,33 @@ export async function parseBrokerageScreenshot(
   engineConfig?: AIEngineConfig,
   existingAccounts: AssetAccount[] = []
 ): Promise<ParsedScreenshotResult> {
+  const currentKey = sanitizeApiKey(engineConfig?.apiKey) || getSecureGeminiApiKey() || '';
+  const effectiveConfig: AIEngineConfig = {
+    engineType: engineConfig?.engineType || (currentKey ? 'byok' : 'local'),
+    localModel: engineConfig?.localModel || 'gemma-2b',
+    provider: engineConfig?.provider || 'gemini',
+    modelTier: engineConfig?.modelTier || 'gemini-3.8-flash',
+    apiKey: currentKey
+  };
+
   const res = await fetch('/api/parse-asset-screenshot', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       image: imageBase64,
       mimeType,
-      engineConfig
+      engineConfig: effectiveConfig
     })
   });
 
+  if (res.status === 401 || res.status === 403) {
+    throw new Error('INVALID_API_KEY: Gemini API 키 인증에 실패했습니다. 설정에서 키를 확인해주세요.');
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `스크린샷 분석에 실패했습니다. (HTTP ${res.status})`);
+    const rawError = err.error || `스크린샷 분석에 실패했습니다. (HTTP ${res.status})`;
+    throw new Error(redactSensitiveKey(rawError, currentKey));
   }
 
   const data = await res.json();
