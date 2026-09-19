@@ -19,6 +19,8 @@ export interface AssetAccount {
   accountName: string; // e.g., 'Toss US Stock', 'Kakao Domestic ISA'
   assetType: AssetCategoryType;
   currentBalance: number;
+  cashBalance?: number; // 예수금 / 출금가능 현금
+  investedAssets?: number; // 주식/코인/펀드 평가금액
   currency: string; // 'KRW', 'USD', etc.
   lastUpdated: string; // ISO date
   note?: string;
@@ -155,6 +157,63 @@ export interface EncryptedBackupPayload {
   };
 }
 
+// Advanced Debt & Receivable Model
+export type DebtType = 'LOAN_PAYABLE' | 'LOAN_RECEIVABLE' | 'MORTGAGE' | 'CREDIT_LINE';
+
+export interface DebtItem {
+  id: string;
+  name: string; // e.g. "카카오뱅크 신용대출", "김민수 빌려준 돈", "신한은행 마이너스통장"
+  type: DebtType;
+  counterpartyOrBank: string; // e.g. "카카오뱅크", "김민수", "신한은행"
+  originalPrincipal: number;
+  remainingPrincipal: number;
+  currency: CurrencyCode;
+  interestRateAnnual?: number; // e.g. 4.5% annual interest
+  monthlyPaymentDay?: number; // e.g. 25th of month
+  monthlyEstimatedPayment?: number; // e.g. 1,000,000 KRW
+  startDate?: string;
+  dueDate?: string;
+  notes?: string;
+  lastUpdated: string;
+  isActive: boolean;
+}
+
+export interface LoanSplitSuggestion {
+  debtId: string;
+  debtName: string;
+  totalPayment: number;
+  principalAmount: number; // Reduces liability
+  interestAmount: number; // Logged as Fixed expense
+  currency: CurrencyCode;
+  remainingPrincipalAfter: number;
+  counterpartyOrBank: string;
+  explanation: string;
+}
+
+export interface ReceivableRecoverySuggestion {
+  debtId: string;
+  debtName: string;
+  recoveredAmount: number;
+  currency: CurrencyCode;
+  remainingPrincipalAfter: number;
+  counterparty: string;
+  explanation: string;
+}
+
+export interface AssetScreenshotMutation {
+  action: 'UPDATE_EXISTING' | 'CREATE_NEW';
+  targetAccountId?: string;
+  institution: string;
+  accountName: string;
+  totalAccountValue: number;
+  cashBalance?: number;
+  investedAssets?: number;
+  currency: string;
+  holdings?: HoldingItem[];
+  confidenceScore: number;
+  explanation: string;
+}
+
 export interface UnencryptedBackupPayloadV2 {
   version: '2.0';
   format: 'vibe-backup-v2';
@@ -164,4 +223,5 @@ export interface UnencryptedBackupPayloadV2 {
   subscriptions?: SubscriptionItem[];
   assets?: Asset[];
   assetAccounts?: AssetAccount[];
+  debts?: DebtItem[];
 }

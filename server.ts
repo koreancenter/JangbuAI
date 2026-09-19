@@ -420,13 +420,26 @@ Requirements:
             accountName: '토스 미국/국내 주식 잔고',
             assetType: 'BROKERAGE',
             currentBalance: 12500000,
+            cashBalance: 1500000,
+            investedAssets: 11000000,
             currency: 'KRW',
             holdings: [
               { name: 'S&P 500 ETF', valuation: 8000000, profitRate: 12.4 },
               { name: '빅테크 포트폴리오', valuation: 4500000, profitRate: 8.7 }
             ],
             confidenceScore: 0.95,
-            notes: '오프라인/로컬 모드 스캔 완료 (샘플 데이터)'
+            notes: '오프라인/로컬 모드 스캔 완료 (샘플 데이터)',
+            readyMutation: {
+              action: 'UPDATE_EXISTING',
+              institution: '토스증권',
+              accountName: '토스 미국/국내 주식 잔고',
+              totalAccountValue: 12500000,
+              cashBalance: 1500000,
+              investedAssets: 11000000,
+              currency: 'KRW',
+              confidenceScore: 0.95,
+              explanation: '토스증권 총 자산 1,250만원 (투자 1,100만원, 예수금 150만원) 즉시 반영 준비'
+            }
           },
           source: 'local'
         });
@@ -461,15 +474,13 @@ Extract the financial asset details into structured data:
 1. "institution": The financial institution or broker name (e.g., "토스증권", "카카오페이증권", "업비트", "카카오뱅크", "KB국민은행", "키움증권", "미래에셋증권").
 2. "accountName": The specific account label or title visible (e.g., "해외주식 종합계좌", "국내주식 ISA", "종합매매", "자유입출금 통장", "가상자산 잔고").
 3. "assetType": Strictly one of ["BROKERAGE", "BANK", "CRYPTO", "REAL_ESTATE", "CASH", "LIABILITY"].
-   - Stock/Brokerage apps -> "BROKERAGE"
-   - Bank/checking/savings accounts -> "BANK"
-   - Crypto wallets/exchanges -> "CRYPTO"
-   - Loans/mortgages/liabilities -> "LIABILITY"
-4. "currentBalance": The total account balance or total portfolio evaluated asset value (총 평가금액, 총 자산, 예수금 합산 등) as a pure positive number in base unit (e.g., "1,250만원" or "12,500,000원" -> 12500000, "$4,200.50" -> 4200.5).
-5. "currency": ISO currency code ("KRW", "USD", "EUR", "JPY", "GBP"). Default to "KRW" if Korean won.
-6. "holdings": Optional array of recognized individual holding items/stocks visible on the screen (with "name", "valuation", "quantity", and "profitRate" as percentage number e.g. +14.2% -> 14.2).
-7. "confidenceScore": Extraction confidence score between 0.0 and 1.0.
-8. "notes": Brief summary of parsed asset (e.g. "총 평가자산 12,500,000원 감지됨").
+4. "currentBalance": The total account balance or total portfolio evaluated asset value (총 평가금액, 총 자산, 예수금 합산 등) as a pure positive number in base unit (e.g., "1,250만원" -> 12500000, "$4,200.50" -> 4200.5).
+5. "cashBalance": Cash balance, uninvested deposit, or available cash (예수금, 출금가능금액, 원화 잔고) as a positive number.
+6. "investedAssets": Total invested market value or evaluation amount of stocks/crypto/funds (주식/코인 평가금액, 투자원금) as a positive number.
+7. "currency": ISO currency code ("KRW", "USD", "EUR", "JPY", "GBP"). Default to "KRW" if Korean won.
+8. "holdings": Optional array of recognized individual holding items/stocks visible on the screen (with "name", "valuation", "quantity", and "profitRate" as percentage number e.g. +14.2% -> 14.2).
+9. "confidenceScore": Extraction confidence score between 0.0 and 1.0.
+10. "notes": Brief summary of parsed asset (e.g. "총 평가자산 12,500,000원 감지됨").
 
 [STRICT PRIVACY RULE]
 Never output full resident identity numbers, personal passwords, or full unmasked account numbers.`
@@ -497,6 +508,14 @@ Never output full resident identity numbers, personal passwords, or full unmaske
               currentBalance: {
                 type: Type.NUMBER,
                 description: 'Total evaluated balance or account value as a number'
+              },
+              cashBalance: {
+                type: Type.NUMBER,
+                description: 'Cash deposit or uninvested cash (예수금/출금가능금액)'
+              },
+              investedAssets: {
+                type: Type.NUMBER,
+                description: 'Invested stock/crypto market valuation'
               },
               currency: {
                 type: Type.STRING,
@@ -535,21 +554,45 @@ Never output full resident identity numbers, personal passwords, or full unmaske
 
       const validAssetTypes = ['BROKERAGE', 'BANK', 'CRYPTO', 'REAL_ESTATE', 'CASH', 'LIABILITY'];
       const assetType = validAssetTypes.includes(parsed.assetType) ? parsed.assetType : 'BROKERAGE';
+      const totalVal = Math.abs(Number(parsed.currentBalance)) || 0;
+      const cashVal = typeof parsed.cashBalance === 'number' ? Math.abs(parsed.cashBalance) : undefined;
+      const invVal = typeof parsed.investedAssets === 'number' ? Math.abs(parsed.investedAssets) : (cashVal !== undefined ? Math.max(0, totalVal - cashVal) : undefined);
+
+      const instName = String(parsed.institution || '기타 금융기관').trim();
+      const accName = String(parsed.accountName || '자산 계좌').trim();
+      const curr = (['KRW', 'USD', 'EUR', 'JPY', 'GBP'].includes(parsed.currency?.toUpperCase()) ? parsed.currency.toUpperCase() : 'KRW');
+      const conf = typeof parsed.confidenceScore === 'number' ? Math.min(1, Math.max(0, parsed.confidenceScore)) : 0.95;
+
+      const holdings = Array.isArray(parsed.holdings) ? parsed.holdings.map((h: any) => ({
+        name: String(h.name || '').trim(),
+        valuation: Math.abs(Number(h.valuation)) || 0,
+        quantity: h.quantity ? Number(h.quantity) : undefined,
+        profitRate: typeof h.profitRate === 'number' ? h.profitRate : undefined,
+      })) : [];
 
       const asset = {
-        institution: String(parsed.institution || '기타 금융기관').trim(),
-        accountName: String(parsed.accountName || '자산 계좌').trim(),
+        institution: instName,
+        accountName: accName,
         assetType,
-        currentBalance: Math.abs(Number(parsed.currentBalance)) || 0,
-        currency: (['KRW', 'USD', 'EUR', 'JPY', 'GBP'].includes(parsed.currency?.toUpperCase()) ? parsed.currency.toUpperCase() : 'KRW'),
-        holdings: Array.isArray(parsed.holdings) ? parsed.holdings.map((h: any) => ({
-          name: String(h.name || '').trim(),
-          valuation: Math.abs(Number(h.valuation)) || 0,
-          quantity: h.quantity ? Number(h.quantity) : undefined,
-          profitRate: typeof h.profitRate === 'number' ? h.profitRate : undefined,
-        })) : [],
-        confidenceScore: typeof parsed.confidenceScore === 'number' ? Math.min(1, Math.max(0, parsed.confidenceScore)) : 0.95,
-        notes: String(parsed.notes || '').trim()
+        currentBalance: totalVal,
+        cashBalance: cashVal,
+        investedAssets: invVal,
+        currency: curr,
+        holdings,
+        confidenceScore: conf,
+        notes: String(parsed.notes || '').trim(),
+        readyMutation: {
+          action: 'UPDATE_EXISTING',
+          institution: instName,
+          accountName: accName,
+          totalAccountValue: totalVal,
+          cashBalance: cashVal,
+          investedAssets: invVal,
+          currency: curr,
+          holdings,
+          confidenceScore: conf,
+          explanation: `${instName} 총 자산 ${totalVal.toLocaleString()}원 ${curr} 잔고 반영 준비`
+        }
       };
 
       res.json({ asset, source: 'gemini' });
@@ -601,23 +644,35 @@ CRITICAL RULES:
      * CRITICAL: Inputs like "오늘 월급 800만원 들어옴", "월급 들어옴", "급여 350만원 입금", "용돈 10만원 받음" MUST ALWAYS BE type: "INCOME"!
      * Category for INCOME must be "Fixed", subCategory: "Salary" (or "Bonus", "Allowance", etc.). NEVER classify as "EXPENSE" or "Living"!
    - "EXPENSE": Any money spent on goods, dining, shopping, bills, services (e.g. "결제", "샀음", "지출", "먹었음").
-   - "TRANSFER": Moving money between accounts, savings/investment deposits (e.g. "주택청약 150만원 자동이체", "적금 통장으로 50만원 송금").
-   - "SETTLEMENT": Dutch-pay reimbursements, receiving money back from friends (e.g. "정산받음", "더치페이로 2만원 받음").
+   - "TRANSFER": Moving money between accounts, credit card bill payments, savings/investment deposits (e.g. "주택청약 150만원 자동이체", "적금 통장으로 50만원 송금", "현대카드 결제대금 145만원 출금", "신한에서 토스로 송금").
+     * CRITICAL: Always set isInternalTransfer: true for transfers and card settlements to prevent inflating monthly spending!
+   - "SETTLEMENT": Dutch-pay reimbursements, or receiving lent money back from borrowers (e.g. "정산받음", "더치페이로 2만원 받음", "김민수 5만원 입금", "빌려준 돈 받음").
+     * CRITICAL: Receiving money lent to someone back MUST be "SETTLEMENT" with isInternalTransfer: true, NEVER "INCOME"!
 
-2. Korean Number Unit Semantics:
+2. Smart Debt & Loan Split Detection:
+   - When an SMS or notification says "[Bank Name] Loan Repayment 1,000,000 KRW" or "대출 원리금 100만원 납입":
+     Split into:
+     1) type: "TRANSFER", isInternalTransfer: true, category: "Fixed", subCategory: "원금상환", description: "대출 원금 상환"
+     2) type: "EXPENSE", isInternalTransfer: false, category: "Fixed", subCategory: "대출이자", description: "대출 이자 비용"
+
+3. Credit Card Bill Settlement Deduplication:
+   - Credit card bill debits (e.g. "현대카드 결제대금 1,450,000원 출금", "신한카드 대금 결제"):
+     Mark strictly as type: "TRANSFER" with isInternalTransfer: true and subCategory: "카드대금". NEVER mark as "EXPENSE" because individual purchases were already tracked!
+
+4. Korean Number Unit Semantics:
    - "만" or "만원" = 10,000 (e.g. "800만원" -> 8000000, "4만원" -> 40000, "1.5만" -> 15000, "350만원" -> 3500000). NEVER parse "800만원" as 800 or 8!
    - "천" or "천원" = 1,000 (e.g. "5천원" -> 5000, "4만5천원" -> 45000).
    - "억" or "억원" = 100,000,000 (e.g. "1억" -> 100000000, "1억 2천만원" -> 120000000).
    - Amounts MUST ALWAYS be positive numbers (> 0). Never output negative numbers.
 
-3. Dutch Pay & Split Expense Handling:
+5. Dutch Pay & Split Expense Handling:
    - If user paid a group bill and received money back (e.g. "민수랑 파스타 4만원 더치페이하고 토스로 2만원 받음"):
      Produce TWO entries with matching groupId:
      1) type: "EXPENSE", amount: 40000, description: "파스타 더치페이"
      2) type: "SETTLEMENT", amount: 20000, paymentMethod: "Toss", description: "더치페이 정산 (파스타)"
 
-4. Category Mapping:
-   - Fixed: Salary/Income (월급, 급여, 상여), Subscriptions (넷플릭스, 유튜브), Utilities (관리비, 전기세, 통신비), Finance (주택청약, 적금, 보험)
+6. Category Mapping:
+   - Fixed: Salary/Income (월급, 급여, 상여), Subscriptions (넷플릭스, 유튜브), Utilities (관리비, 전기세, 통신비), Finance (주택청약, 적금, 보험, 대출이자, 원금상환, 카드대금)
    - Food: Grocery (이마트, 컬리, 마트), Dining (순두부, 파스타, 식당, 점심, 저녁), Cafe (스타벅스, 투썸, 메가커피, 커피), Delivery (배민, 요기요)
    - Living: Daily Supplies (다이소, 올리브영, 화장지), Shopping (쿠팡, 네이버쇼핑), Convenience (GS25, CU), Fashion (무신사, 유니클로)
    - Transport: Public Transport (지하철, 버스), Taxi (카카오T, 택시), Vehicle (주유소, 주차)
@@ -641,7 +696,8 @@ Output a JSON array of parsed transactions.`,
                   date: { type: Type.STRING, description: "ISO date string of transaction, default to today if not specified" },
                   paymentMethod: { type: Type.STRING, description: "Payment method (e.g. Card, Cash, Kakao Pay, Toss, etc.)" },
                   groupId: { type: Type.STRING, description: "Optional matching group ID linking dutch-pay pairs or split transactions together" },
-                  originalTotal: { type: Type.NUMBER, description: "Optional initial gross bill amount before split" }
+                  originalTotal: { type: Type.NUMBER, description: "Optional initial gross bill amount before split" },
+                  isInternalTransfer: { type: Type.BOOLEAN, description: "True if internal transfer, card bill settlement, or lent money recovery to avoid budget double counting" }
                 },
                 required: ["type", "amount", "currency", "category", "description", "date"]
               }
@@ -700,6 +756,8 @@ Output a JSON array of parsed transactions.`,
             desc = type === 'INCOME' ? '급여 수입' : '지출 내역';
           }
 
+          const isInternalTransfer = t.isInternalTransfer === true || type === 'TRANSFER' || /카드대금|계좌이체|송금|자산이체|원금상환|대여금회수/i.test(desc + (subCategory || ''));
+
           return {
             type,
             amount,
@@ -710,7 +768,8 @@ Output a JSON array of parsed transactions.`,
             date: t.date || new Date().toISOString(),
             paymentMethod: t.paymentMethod || (type === 'INCOME' ? '계좌이체' : 'Card'),
             groupId: t.groupId,
-            originalTotal: t.originalTotal ? Math.abs(Number(t.originalTotal)) : undefined
+            originalTotal: t.originalTotal ? Math.abs(Number(t.originalTotal)) : undefined,
+            isInternalTransfer
           };
         });
 

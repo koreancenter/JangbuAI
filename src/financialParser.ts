@@ -1,4 +1,4 @@
-import { TransactionType, CurrencyCode, ParsedReceiptData, ReceiptItem } from './types';
+import { TransactionType, CurrencyCode, ParsedReceiptData, ReceiptItem, DebtItem, LoanSplitSuggestion, ReceivableRecoverySuggestion } from './types';
 
 export interface ParsedTransactionResult {
   type: TransactionType;
@@ -14,6 +14,9 @@ export interface ParsedTransactionResult {
   originalTotal?: number;
   confidenceScore?: number;
   rawClause?: string;
+  isInternalTransfer?: boolean;
+  loanSplitSuggestion?: LoanSplitSuggestion;
+  receivableRecoverySuggestion?: ReceivableRecoverySuggestion;
 }
 
 /**
@@ -400,14 +403,276 @@ export function inferCategoryAndMerchant(text: string): {
 }
 
 /**
+ * 1. Credit Card Settlement & Internal Transfer Deduplication Detector:
+ * Recognizes credit card bill debits, payment notifications, and inter-account transfers.
+ * Marks them strictly as TRANSFER (with isInternalTransfer: true) to prevent double counting
+ * against monthly spending budgets!
+ */
+export function detectCreditCardSettlement(text: string): {
+  isCardSettlement: boolean;
+  cardName: string;
+  amount?: number;
+  description: string;
+} | null {
+  const isCardBilling = /(?:카드\s*(?:결제\s*대금|대금\s*결제|결제금액|청구\s*금액|결제일|이용대금|대금\s*출금|대금|납부|청구서)|(?:신용카드|체크카드)\s*대금|(?:후불교통|후불교통비)\s*출금)/i.test(text);
+  if (!isCardBilling) return null;
+
+  const cardMatch = text.match(/(현대카드|신한카드|국민카드|KB국민카드|삼성카드|롯데카드|우리카드|하나카드|NH농협카드|농협카드|BC카드|씨티카드|토스카드|카카오페이카드|카카오뱅크카드|[가-힣a-zA-Z0-9]+카드)/i);
+  const cardName = cardMatch ? cardMatch[1].trim() : '신용카드';
+  const amount = parseKoreanAmount(text);
+
+  return {
+    isCardSettlement: true,
+    cardName,
+    amount: amount || undefined,
+    description: `${cardName} 결제대금 출금 (예산 중복 집계 방지 TRANSFER)`
+  };
+}
+
+/**
+ * 2. Smart Debt & Loan Split Detector:
+ * Recognizes loan repayment notifications/SMS (e.g. "[카카오뱅크] 대출 원리금 1,000,000원 납입 완료").
+ * Cross-references with existing DebtItem records, calculates or estimates the split:
+ * Principal (reduces debt liability) vs Interest (logged as financial expense).
+ */
+export function detectLoanRepaymentNotification(
+  text: string,
+  debts: DebtItem[] = []
+): {
+  isLoanRepayment: boolean;
+  debt?: DebtItem;
+  totalPayment: number;
+  principal: number;
+  interest: number;
+  suggestion: LoanSplitSuggestion;
+} | null {
+  const isLoanKeyword = /(?:대출|원리금|원금\s*상환|대출금|이자\s*납입|대출이자|학자금\s*상환|마이너스통장|담보대출|전세대출|신용대출)/i.test(text);
+  const isActionKeyword = /(?:상환|납입|출금|자동이체|납부|이체|원리금)/i.test(text);
+
+  if (!isLoanKeyword || !isActionKeyword) return null;
+
+  // 1. Try to find matching debt from existing records
+  const activeDebts = debts.filter(d => d.isActive !== false && d.type !== 'LOAN_RECEIVABLE');
+  let matchedDebt = activeDebts.find(d => 
+    text.includes(d.counterpartyOrBank) || 
+    text.includes(d.name) ||
+    (d.counterpartyOrBank && text.includes(d.counterpartyOrBank.replace(/은행|뱅크/g, '')))
+  );
+
+  if (!matchedDebt && activeDebts.length > 0) {
+    // If only one active debt exists, associate with it
+    matchedDebt = activeDebts[0];
+  }
+
+  // 2. Check for explicit principal vs interest split in text
+  // e.g., "원금 820,000원, 이자 180,000원" or "원금 80만원 / 이자 20만원"
+  const principalMatch = text.match(/원금(?:\s*상환액)?(?:\s*[:은는]?\s*)?(\d+(?:\.\d+)?\s*(?:억원|억|만원|만|천원|천|원)?)/i);
+  const interestMatch = text.match(/이자(?:\s*비용)?(?:\s*[:은는]?\s*)?(\d+(?:\.\d+)?\s*(?:억원|억|만원|만|천원|천|원)?)/i);
+
+  let principal = 0;
+  let interest = 0;
+  let totalPayment = parseKoreanAmount(text) || 0;
+
+  if (principalMatch && interestMatch) {
+    principal = parseKoreanAmount(principalMatch[1]) || 0;
+    interest = parseKoreanAmount(interestMatch[1]) || 0;
+    if (principal > 0 && interest > 0) {
+      totalPayment = principal + interest;
+    }
+  } else if (totalPayment > 0 && matchedDebt) {
+    // Auto-calculate split using debt contract details
+    const annualRate = matchedDebt.interestRateAnnual || 4.5;
+    // Monthly interest = Remaining Principal * (Annual Rate / 100 / 12)
+    interest = Math.round(matchedDebt.remainingPrincipal * (annualRate / 100 / 12));
+    if (interest >= totalPayment) {
+      interest = Math.round(totalPayment * 0.25); // reasonable safety bound
+    }
+    principal = Math.max(0, totalPayment - interest);
+  } else if (totalPayment > 0) {
+    // Default estimated 80/20 split if no debt registered yet
+    interest = Math.round(totalPayment * 0.2);
+    principal = totalPayment - interest;
+  }
+
+  const remainingAfter = matchedDebt 
+    ? Math.max(0, matchedDebt.remainingPrincipal - principal)
+    : 0;
+
+  const debtName = matchedDebt ? matchedDebt.name : '대출 원리금 상환';
+  const counterparty = matchedDebt ? matchedDebt.counterpartyOrBank : '금융기관';
+  const debtId = matchedDebt ? matchedDebt.id : 'unknown-debt';
+
+  const suggestion: LoanSplitSuggestion = {
+    debtId,
+    debtName,
+    totalPayment,
+    principalAmount: principal,
+    interestAmount: interest,
+    currency: matchedDebt?.currency || 'KRW',
+    remainingPrincipalAfter: remainingAfter,
+    counterpartyOrBank: counterparty,
+    explanation: `${debtName} 상환: 원금 감채 ${principal.toLocaleString()}원 (부채 감소) + 이자 비용 ${interest.toLocaleString()}원 (금융비용)`
+  };
+
+  return {
+    isLoanRepayment: true,
+    debt: matchedDebt,
+    totalPayment,
+    principal,
+    interest,
+    suggestion
+  };
+}
+
+/**
+ * 3. Context-Aware Receivable Matching:
+ * When an incoming transfer arrives from a known counterparty (e.g. "김민수 50,000원 입금"),
+ * checks if there is an active LOAN_RECEIVABLE associated with that person.
+ * Suggests deducting from the receivable balance instead of incorrectly counting it as newly earned Income!
+ */
+export function detectReceivableRecoveryNotification(
+  text: string,
+  debts: DebtItem[] = []
+): {
+  isReceivableRecovery: boolean;
+  debt: DebtItem;
+  recoveredAmount: number;
+  suggestion: ReceivableRecoverySuggestion;
+} | null {
+  const isIncoming = /(?:입금|송금받|받았|들어옴|받음|이체받|정산금|빌려준\s*돈)/i.test(text);
+  if (!isIncoming) return null;
+
+  const receivables = debts.filter(d => d.type === 'LOAN_RECEIVABLE' && d.isActive !== false && d.remainingPrincipal > 0);
+  if (receivables.length === 0) return null;
+
+  // Check if any borrower's name or debt label is mentioned
+  let matchedReceivable: DebtItem | undefined;
+  for (const rec of receivables) {
+    const nameOnly = rec.counterpartyOrBank.trim();
+    if (nameOnly && (text.includes(nameOnly) || rec.name.includes(nameOnly))) {
+      matchedReceivable = rec;
+      break;
+    }
+  }
+
+  if (!matchedReceivable) return null;
+
+  const amount = parseKoreanAmount(text) || matchedReceivable.remainingPrincipal;
+  const remainingAfter = Math.max(0, matchedReceivable.remainingPrincipal - amount);
+
+  const suggestion: ReceivableRecoverySuggestion = {
+    debtId: matchedReceivable.id,
+    debtName: matchedReceivable.name,
+    recoveredAmount: amount,
+    currency: matchedReceivable.currency || 'KRW',
+    remainingPrincipalAfter: remainingAfter,
+    counterparty: matchedReceivable.counterpartyOrBank,
+    explanation: `${matchedReceivable.counterpartyOrBank}님에게 빌려준 돈(${matchedReceivable.remainingPrincipal.toLocaleString()}원 중) ${amount.toLocaleString()}원 상환 회수 (미수 채권 차감 및 수입 부풀림 방지)`
+  };
+
+  return {
+    isReceivableRecovery: true,
+    debt: matchedReceivable,
+    recoveredAmount: amount,
+    suggestion
+  };
+}
+
+/**
  * Parses full natural language string deterministically into structured transactions.
  */
-export function parseFinancialInputDeterministically(rawPrompt: string): ParsedTransactionResult[] {
+export function parseFinancialInputDeterministically(rawPrompt: string, debts: DebtItem[] = []): ParsedTransactionResult[] {
   const now = new Date().toISOString();
   const sanitized = anonymizeFinancialInput(rawPrompt);
   const currency = detectCurrency(sanitized);
   const paymentMethod = detectPaymentMethod(sanitized);
   const results: ParsedTransactionResult[] = [];
+
+  // A. Check for Loan Repayment Notification (Smart Principal vs Interest Split)
+  const loanRepayment = detectLoanRepaymentNotification(sanitized, debts);
+  if (loanRepayment && loanRepayment.totalPayment > 0) {
+    const groupId = `loan-split-${Date.now()}`;
+    // 1) Principal reduction (Non-expense liability reduction)
+    if (loanRepayment.principal > 0) {
+      results.push({
+        type: 'TRANSFER',
+        amount: loanRepayment.principal,
+        currency: loanRepayment.suggestion.currency,
+        category: 'Fixed',
+        subCategory: '원금상환',
+        description: `${loanRepayment.debt?.name || '대출'} 원금 상환`,
+        date: now,
+        paymentMethod: loanRepayment.debt?.counterpartyOrBank || paymentMethod,
+        isInternalTransfer: true,
+        groupId,
+        confidenceScore: 0.98,
+        rawClause: sanitized,
+        loanSplitSuggestion: loanRepayment.suggestion
+      });
+    }
+    // 2) Interest expense (Financial expense)
+    if (loanRepayment.interest > 0) {
+      results.push({
+        type: 'EXPENSE',
+        amount: loanRepayment.interest,
+        currency: loanRepayment.suggestion.currency,
+        category: 'Fixed',
+        subCategory: '대출이자',
+        description: `${loanRepayment.debt?.name || '대출'} 이자 비용`,
+        date: now,
+        paymentMethod: loanRepayment.debt?.counterpartyOrBank || paymentMethod,
+        isInternalTransfer: false,
+        groupId,
+        confidenceScore: 0.98,
+        rawClause: sanitized,
+        loanSplitSuggestion: loanRepayment.suggestion
+      });
+    }
+    return results;
+  }
+
+  // B. Check for Context-Aware Receivable Matching (Recovering lent money)
+  const receivableRecovery = detectReceivableRecoveryNotification(sanitized, debts);
+  if (receivableRecovery && receivableRecovery.recoveredAmount > 0) {
+    results.push({
+      type: 'SETTLEMENT',
+      amount: receivableRecovery.recoveredAmount,
+      currency: receivableRecovery.suggestion.currency,
+      category: 'Fixed',
+      subCategory: '대여금회수',
+      description: `${receivableRecovery.debt.name} 상환 입금 (${receivableRecovery.debt.counterpartyOrBank})`,
+      date: now,
+      paymentMethod: '계좌이체',
+      originalTotal: receivableRecovery.debt.originalPrincipal,
+      isInternalTransfer: true, // Prevents misclassifying as new income!
+      confidenceScore: 0.98,
+      rawClause: sanitized,
+      receivableRecoverySuggestion: receivableRecovery.suggestion
+    });
+    return results;
+  }
+
+  // C. Check for Credit Card Settlement (Deduplication against budget inflation)
+  const cardSettlement = detectCreditCardSettlement(sanitized);
+  if (cardSettlement) {
+    const amount = cardSettlement.amount || parseKoreanAmount(sanitized) || 0;
+    if (amount > 0) {
+      results.push({
+        type: 'TRANSFER',
+        amount,
+        currency,
+        category: 'Fixed',
+        subCategory: '카드대금',
+        description: cardSettlement.description,
+        date: now,
+        paymentMethod: cardSettlement.cardName,
+        isInternalTransfer: true,
+        confidenceScore: 0.98,
+        rawClause: sanitized
+      });
+      return results;
+    }
+  }
 
   // 1. Check for Dutch Pay / Settlement in Korean or English
   // Examples:
@@ -548,6 +813,7 @@ export function parseFinancialInputDeterministically(rawPrompt: string): ParsedT
       description: desc,
       date: now,
       paymentMethod: '계좌이체',
+      isInternalTransfer: true,
       confidenceScore: 0.95,
       rawClause: sanitized
     });

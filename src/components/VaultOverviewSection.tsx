@@ -387,6 +387,8 @@ export const VaultOverviewSection: React.FC<VaultOverviewSectionProps> = ({
           accountName: scannedResult.accountName || '스캔된 자산 계좌',
           assetType: scannedResult.assetType || 'BROKERAGE',
           currentBalance: scannedResult.currentBalance || 0,
+          cashBalance: scannedResult.cashBalance,
+          investedAssets: scannedResult.investedAssets,
           currency: scannedResult.currency || currentCurrency,
           lastUpdated: new Date().toISOString(),
           holdings: scannedResult.holdings,
@@ -398,12 +400,14 @@ export const VaultOverviewSection: React.FC<VaultOverviewSectionProps> = ({
         // Update existing
         const target = accounts.find((a) => a.id === scanTargetAccountId);
         if (target) {
-          await updateAssetAccountBalance(target.id, scannedResult.currentBalance);
+          target.currentBalance = scannedResult.currentBalance;
+          if (scannedResult.cashBalance !== undefined) target.cashBalance = scannedResult.cashBalance;
+          if (scannedResult.investedAssets !== undefined) target.investedAssets = scannedResult.investedAssets;
           if (scannedResult.holdings && scannedResult.holdings.length > 0) {
             target.holdings = scannedResult.holdings;
-            target.lastUpdated = new Date().toISOString();
-            await saveAssetAccount(target);
           }
+          target.lastUpdated = new Date().toISOString();
+          await saveAssetAccount(target);
           showToast(`'${target.accountName}' 잔고가 ₩${scannedResult.currentBalance.toLocaleString()}으로 업데이트되었습니다.`);
         }
       }
@@ -1062,6 +1066,27 @@ export const VaultOverviewSection: React.FC<VaultOverviewSectionProps> = ({
                         </span>
                       </div>
                     </div>
+
+                    {(scannedResult.cashBalance !== undefined || scannedResult.investedAssets !== undefined) && (
+                      <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-white/10 text-xs">
+                        {scannedResult.investedAssets !== undefined && (
+                          <div>
+                            <span className="text-[10px] text-slate-400 block">투자 자산 평가액</span>
+                            <span className="font-bold text-emerald-400">
+                              {formatCurrency(scannedResult.investedAssets, scannedResult.currency || currentCurrency)}
+                            </span>
+                          </div>
+                        )}
+                        {scannedResult.cashBalance !== undefined && (
+                          <div>
+                            <span className="text-[10px] text-slate-400 block">예수금 / 현금</span>
+                            <span className="font-bold text-amber-400">
+                              {formatCurrency(scannedResult.cashBalance, scannedResult.currency || currentCurrency)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {scannedResult.holdings && scannedResult.holdings.length > 0 && (
                       <div className="mt-3 pt-2 border-t border-white/10">

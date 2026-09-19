@@ -1,5 +1,37 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Transaction, AssetAccount } from './types';
+import { Transaction, AssetAccount, DebtItem } from './types';
+
+export const INITIAL_DEBT_ITEMS: DebtItem[] = [
+  {
+    id: 'debt-kakao-loan',
+    name: '카카오뱅크 직장인 신용대출',
+    type: 'LOAN_PAYABLE',
+    counterpartyOrBank: '카카오뱅크',
+    originalPrincipal: 30000000,
+    remainingPrincipal: 24500000,
+    currency: 'KRW',
+    interestRateAnnual: 4.8,
+    monthlyPaymentDay: 25,
+    monthlyEstimatedPayment: 1000000,
+    startDate: '2025-01-25',
+    dueDate: '2028-01-25',
+    notes: '원리금 균등 분할 상환',
+    lastUpdated: new Date().toISOString(),
+    isActive: true,
+  },
+  {
+    id: 'debt-minsu-receivable',
+    name: '김민수 빌려준 돈',
+    type: 'LOAN_RECEIVABLE',
+    counterpartyOrBank: '김민수',
+    originalPrincipal: 300000,
+    remainingPrincipal: 200000,
+    currency: 'KRW',
+    notes: '여행 경비 대납 정산 잔액',
+    lastUpdated: new Date().toISOString(),
+    isActive: true,
+  }
+];
 
 export const INITIAL_ASSET_ACCOUNTS: AssetAccount[] = [
   {
@@ -75,13 +107,21 @@ interface VibeVaultDB extends DBSchema {
       'by-institution': string;
     };
   };
+  debts: {
+    key: string;
+    value: DebtItem;
+    indexes: {
+      'by-type': string;
+      'by-counterparty': string;
+    };
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<VibeVaultDB>>;
 
 export function getDB() {
   if (!dbPromise) {
-    dbPromise = openDB<VibeVaultDB>('vibe-vault-db', 3, {
+    dbPromise = openDB<VibeVaultDB>('vibe-vault-db', 4, {
       upgrade(db, oldVersion, _newVersion, transaction) {
         let txStore;
         if (oldVersion < 1) {
@@ -111,6 +151,17 @@ export function getDB() {
             });
             assetStore.createIndex('by-type', 'assetType');
             assetStore.createIndex('by-institution', 'institution');
+          }
+        }
+
+        // Migration to Schema v4: Debts & Loans Store
+        if (oldVersion < 4) {
+          if (!db.objectStoreNames.contains('debts')) {
+            const debtStore = db.createObjectStore('debts', {
+              keyPath: 'id',
+            });
+            debtStore.createIndex('by-type', 'type');
+            debtStore.createIndex('by-counterparty', 'counterpartyOrBank');
           }
         }
       },
@@ -292,5 +343,171 @@ export async function executeAccountTransfer(
 
   return { transaction: transferTx, sourceAccount: source, targetAccount: target };
 }
+
+/**
+ * Advanced Debt & Loan Persistence
+ */
+export async function getAllDebts(): Promise<DebtItem[]> {
+  const db = await getDB();
+  const debts = await db.getAll('debts');
+  if (!debts || debts.length === 0) {
+    // Seed initial demo loans & receivables so user immediately tests smart splits
+    const tx = db.transaction('debts', 'readwrite');
+    for (const item of INITIAL_DEBT_ITEMS) {
+      tx.store.put(item);
+    }
+    await tx.done;
+    return INITIAL_DEBT_ITEMS;
+  }
+  return debts;
+}
+
+export async function saveDebt(debt: DebtItem): Promise<void> {
+  const db = await getDB();
+  await db.put('debts', debt);
+}
+
+export async function deleteDebt(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('debts', id);
+}
+
+export async function updateDebtRemainingPrincipal(id: string, newRemaining: number): Promise<DebtItem | null> {
+  const db = await getDB();
+  const debt = await db.get('debts', id);
+  if (!debt) return null;
+
+  debt.remainingPrincipal = Math.max(0, newRemaining);
+  if (debt.remainingPrincipal === 0) {
+    debt.isActive = false;
+  }
+  debt.lastUpdated = new Date().toISOString();
+  await db.put('debts', debt);
+  return debt;
+}
+
+/**
+ * Executes a one-tap Loan Repayment Split:
+ * Atomically creates the interest expense transaction,
+ * and reduces the debt's remaining principal!
+ */
+export async function executeLoanRepaymentSplit(
+  debtId: string,
+  principalReduction: number,
+  interestAmount: number,
+  currency: string = 'KRW',
+  paymentMethod?: string
+): Promise<{ interestTransaction?: Transaction; principalTransaction: Transaction; updatedDebt: DebtItem }> {
+  const db = await getDB();
+  const debt = await db.get('debts', debtId);
+  if (!debt) throw new Error('대출/부채 항목을 찾을 수 없습니다.');
+
+  // 1. Calculate new remaining balance
+  debt.remainingPrincipal = Math.max(0, debt.remainingPrincipal - principalReduction);
+  if (debt.remainingPrincipal === 0) {
+    debt.isActive = false;
+  }
+  debt.lastUpdated = new Date().toISOString();
+
+  const nowIso = new Date().toISOString();
+  const groupId = `loan-repay-${debtId}-${Date.now()}`;
+
+  // 2. Principal repayment transaction (Non-expense liability reduction)
+  const principalTx: Transaction = {
+    id: `tx-principal-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    type: 'TRANSFER',
+    amount: principalReduction,
+    currency,
+    category: 'Fixed',
+    subCategory: '원금상환',
+    description: `${debt.name} 원금 상환`,
+    date: nowIso,
+    paymentMethod: paymentMethod || debt.counterpartyOrBank,
+    groupId,
+    isInternalTransfer: true,
+  };
+
+  // 3. Interest transaction (Financial Expense)
+  let interestTx: Transaction | undefined;
+  if (interestAmount > 0) {
+    interestTx = {
+      id: `tx-interest-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      type: 'EXPENSE',
+      amount: interestAmount,
+      currency,
+      category: 'Fixed',
+      subCategory: '대출이자',
+      description: `${debt.name} 이자 비용`,
+      date: nowIso,
+      paymentMethod: paymentMethod || debt.counterpartyOrBank,
+      groupId,
+      isInternalTransfer: false,
+    };
+  }
+
+  // 4. Perform atomic multi-store write
+  const stores = interestTx ? ['debts', 'transactions'] as const : ['debts', 'transactions'] as const;
+  const tx = db.transaction(stores, 'readwrite');
+  tx.objectStore('debts').put(debt);
+  tx.objectStore('transactions').put(principalTx);
+  if (interestTx) {
+    tx.objectStore('transactions').put(interestTx);
+  }
+  await tx.done;
+
+  return {
+    interestTransaction: interestTx,
+    principalTransaction: principalTx,
+    updatedDebt: debt
+  };
+}
+
+/**
+ * Executes a one-tap Receivable Recovery:
+ * Atomically marks money returned from borrower as SETTLEMENT (preventing false income inflate)
+ * and reduces the receivable principal.
+ */
+export async function executeReceivableRecovery(
+  debtId: string,
+  recoveryAmount: number,
+  currency: string = 'KRW',
+  paymentMethod?: string
+): Promise<{ settlementTransaction: Transaction; updatedDebt: DebtItem }> {
+  const db = await getDB();
+  const debt = await db.get('debts', debtId);
+  if (!debt) throw new Error('미수금/빌려준 돈 항목을 찾을 수 없습니다.');
+
+  debt.remainingPrincipal = Math.max(0, debt.remainingPrincipal - recoveryAmount);
+  if (debt.remainingPrincipal === 0) {
+    debt.isActive = false;
+  }
+  debt.lastUpdated = new Date().toISOString();
+
+  const nowIso = new Date().toISOString();
+  const settlementTx: Transaction = {
+    id: `tx-receivable-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    type: 'SETTLEMENT',
+    amount: recoveryAmount,
+    currency,
+    category: 'Fixed',
+    subCategory: '대여금회수',
+    description: `${debt.name} 상환 입금 (${debt.counterpartyOrBank})`,
+    date: nowIso,
+    paymentMethod: paymentMethod || '계좌이체',
+    originalTotal: debt.originalPrincipal,
+    isInternalTransfer: true, // Do not inflate new income
+  };
+
+  const tx = db.transaction(['debts', 'transactions'], 'readwrite');
+  tx.objectStore('debts').put(debt);
+  tx.objectStore('transactions').put(settlementTx);
+  await tx.done;
+
+  return {
+    settlementTransaction: settlementTx,
+    updatedDebt: debt
+  };
+}
+
 
 

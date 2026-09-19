@@ -43,6 +43,8 @@ import {
   getCurrencySymbol,
   SUPPORTED_CURRENCIES
 } from './utils';
+import { getAllDebts } from './db';
+import { commitAutonomousLoanSplit, commitAutonomousReceivableRecovery } from './autonomousFinance';
 
 // Architectural Domain Custom Hooks
 import { useTransactions, LedgerFilterType } from './hooks/useTransactions';
@@ -417,21 +419,43 @@ export function App() {
         console.warn('Network parse failed, using client deterministic engine:', fetchErr);
       }
 
+      const debts = await getAllDebts();
+
       // If server response was unavailable or empty, use client-side deterministic parser
       if (parsedTransactions.length === 0) {
-        parsedTransactions = parseFinancialInputDeterministically(textToProcess);
+        parsedTransactions = parseFinancialInputDeterministically(textToProcess, debts);
       }
 
       if (!Array.isArray(parsedTransactions) || parsedTransactions.length === 0) {
         throw new Error('내역을 정확히 인식하지 못했습니다. 다시 말씀해 주세요.');
       }
 
-      const newTxs: Transaction[] = parsedTransactions.map((t: any) => {
+      const newTxs: Transaction[] = [];
+
+      for (const t of parsedTransactions) {
+        // 1. Autonomous Loan Repayment Split Execution
+        if (t.loanSplitSuggestion) {
+          const splitRes = await commitAutonomousLoanSplit(t.loanSplitSuggestion, t.paymentMethod);
+          newTxs.push(splitRes.principalTx);
+          if (splitRes.interestTx) {
+            newTxs.push(splitRes.interestTx);
+          }
+          continue;
+        }
+
+        // 2. Autonomous Receivable Recovery Execution
+        if (t.receivableRecoverySuggestion) {
+          const recRes = await commitAutonomousReceivableRecovery(t.receivableRecoverySuggestion, t.paymentMethod);
+          newTxs.push(recRes.settlementTx);
+          continue;
+        }
+
+        // 3. Standard Expense / Income / Settlement Transaction
         let type = t.type || 'EXPENSE';
         const isIncomeKeyword = /(?:월급|급여|보너스|상여금|수당|용돈|배당금|이자수익|알바비|연봉|퇴직금|주급|들어옴|입금|수입|벌었|salary|paycheck|bonus|allowance)/i.test(textToProcess) || /(?:월급|급여|보너스|상여금|수당|용돈|배당금|이자수익|알바비|연봉|퇴직금|주급|들어옴|입금|수입|벌었|salary|paycheck|bonus|allowance)/i.test(t.description || '');
         const isExplicitExpense = /(?:결제|지출|썼|사먹|구입|구매)/i.test(textToProcess);
 
-        if (isIncomeKeyword && !isExplicitExpense && type !== 'TRANSFER') {
+        if (isIncomeKeyword && !isExplicitExpense && type !== 'TRANSFER' && type !== 'SETTLEMENT') {
           type = 'INCOME';
         }
 
@@ -458,7 +482,7 @@ export function App() {
           desc = type === 'INCOME' ? '급여 수입' : '지출 내역';
         }
 
-        return {
+        newTxs.push({
           id: crypto.randomUUID(),
           type,
           amount: Math.abs(Number(t.amount)) || 0,
@@ -469,9 +493,10 @@ export function App() {
           date: t.date ? new Date(t.date).toISOString() : new Date().toISOString(),
           paymentMethod: t.paymentMethod || (type === 'INCOME' ? '계좌이체' : 'Card'),
           groupId: t.groupId,
-          originalTotal: t.originalTotal ? Math.abs(Number(t.originalTotal)) : undefined
-        };
-      });
+          originalTotal: t.originalTotal ? Math.abs(Number(t.originalTotal)) : undefined,
+          isInternalTransfer: Boolean(t.isInternalTransfer)
+        });
+      }
 
       // When Smart Auto-Categorization is disabled, the user manually selects a category
       if (userPrefs.autoCategorization === false) {
@@ -1143,25 +1168,36 @@ export function App() {
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-md ${
-                          isLight 
-                            ? 'bg-slate-100 text-slate-700' 
-                            : 'bg-white/[0.06] text-slate-300'
-                        }`}>
-                          {getCategoryKo(t.category)}{t.subCategory ? ` · ${t.subCategory}` : ''}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-md ${
+                            t.isInternalTransfer
+                              ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                              : isLight 
+                                ? 'bg-slate-100 text-slate-700' 
+                                : 'bg-white/[0.06] text-slate-300'
+                          }`}>
+                            {t.isInternalTransfer ? '내부이체/원금상환' : `${getCategoryKo(t.category)}${t.subCategory ? ` · ${t.subCategory}` : ''}`}
+                          </span>
+                          {t.isInternalTransfer && t.subCategory && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400 font-medium">
+                              {t.subCategory}
+                            </span>
+                          )}
+                        </div>
 
                         <div className="flex flex-col items-end">
                           <span className={`text-sm font-bold tracking-tight transition-all ${isStealth ? 'blur-sm select-none' : ''} ${
-                            isExpense 
-                              ? isLight ? 'text-slate-950' : 'text-white' 
-                              : isLight ? 'text-emerald-700' : 'text-[#00F5A0]'
+                            t.isInternalTransfer
+                              ? isLight ? 'text-blue-600' : 'text-blue-400'
+                              : isExpense 
+                                ? isLight ? 'text-slate-950' : 'text-white' 
+                                : isLight ? 'text-emerald-700' : 'text-[#00F5A0]'
                           }`}>
-                            {isExpense ? '-' : '+'}{getCurrencySymbol(t.currency || 'KRW')}{t.amount.toLocaleString()}
+                            {t.isInternalTransfer ? '⇄ ' : (isExpense ? '-' : '+')}{getCurrencySymbol(t.currency || 'KRW')}{t.amount.toLocaleString()}
                           </span>
                           {(t.currency || 'KRW') !== currentCurrency && (
                             <span className={`text-[10px] font-semibold ${isLight ? 'text-slate-500' : 'text-slate-400'} ${isStealth ? 'blur-xs select-none' : ''}`}>
-                              ≈ {isExpense ? '-' : '+'}{currSymbol}{Math.round(getAmountInSelectedCurrency(t)).toLocaleString()}
+                              ≈ {t.isInternalTransfer ? '⇄ ' : (isExpense ? '-' : '+')}{currSymbol}{Math.round(getAmountInSelectedCurrency(t)).toLocaleString()}
                             </span>
                           )}
                         </div>

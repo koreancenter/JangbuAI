@@ -6,10 +6,25 @@ import {
   SupportedCurrency, 
   FxRates,
   ParsedReceiptData,
-  ReceiptItem
+  ReceiptItem,
+  AssetAccount,
+  AssetScreenshotMutation,
+  DebtItem,
+  LoanSplitSuggestion,
+  ReceivableRecoverySuggestion
 } from './types';
-import { parseReceiptTextLocally } from './financialParser';
-import { convertCurrency } from './utils';
+import { 
+  parseReceiptTextLocally, 
+  parseFinancialInputDeterministically,
+  ParsedTransactionResult 
+} from './financialParser';
+import { 
+  saveAssetAccount, 
+  getAllAssetAccounts, 
+  executeLoanRepaymentSplit, 
+  executeReceivableRecovery 
+} from './db';
+import { convertCurrency, AIEngineConfig } from './utils';
 import { 
   format, 
   parseISO, 
@@ -601,4 +616,326 @@ export function reconcileReceiptWithTransactions(
   }
 
   return { isDuplicate: false };
+}
+
+/**
+ * ============================================================================
+ * AUTONOMOUS FINANCE ORCHESTRATION PIPELINE
+ * Zero financial calculation friction & autonomous execution engine
+ * ============================================================================
+ */
+
+export interface ParsedScreenshotResult {
+  asset: {
+    institution: string;
+    accountName: string;
+    assetType: 'BROKERAGE' | 'BANK' | 'CRYPTO' | 'REAL_ESTATE' | 'CASH' | 'LIABILITY';
+    currentBalance: number;
+    cashBalance?: number;
+    investedAssets?: number;
+    currency: SupportedCurrency;
+    holdings?: Array<{
+      name: string;
+      valuation: number;
+      quantity?: number;
+      profitRate?: number;
+    }>;
+    confidenceScore: number;
+    notes?: string;
+  };
+  mutation: AssetScreenshotMutation;
+  matchedExistingAccount?: AssetAccount;
+  source: 'gemini' | 'local';
+}
+
+/**
+ * 1. Screenshot-to-Balance Extraction (Multimodal):
+ * Sends screenshot to /api/parse-asset-screenshot, cross-references with existing accounts,
+ * and creates a ready-to-commit AssetScreenshotMutation without asking user to type single numbers.
+ */
+export async function parseBrokerageScreenshot(
+  imageBase64: string,
+  mimeType: string = 'image/webp',
+  engineConfig?: AIEngineConfig,
+  existingAccounts: AssetAccount[] = []
+): Promise<ParsedScreenshotResult> {
+  const res = await fetch('/api/parse-asset-screenshot', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      image: imageBase64,
+      mimeType,
+      engineConfig
+    })
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `스크린샷 분석에 실패했습니다. (HTTP ${res.status})`);
+  }
+
+  const data = await res.json();
+  const rawAsset = data.asset;
+  if (!rawAsset) {
+    throw new Error('자산 스크린샷에서 유효한 계좌 정보를 찾을 수 없습니다.');
+  }
+
+  const institution = String(rawAsset.institution || '기타 금융기관').trim();
+  const accountName = String(rawAsset.accountName || '자산 계좌').trim();
+  const totalAccountValue = Math.abs(Number(rawAsset.currentBalance)) || 0;
+  const cashBalance = typeof rawAsset.cashBalance === 'number' ? Math.abs(rawAsset.cashBalance) : undefined;
+  const investedAssets = typeof rawAsset.investedAssets === 'number' 
+    ? Math.abs(rawAsset.investedAssets) 
+    : (cashBalance !== undefined ? Math.max(0, totalAccountValue - cashBalance) : undefined);
+  const currency: SupportedCurrency = (['KRW', 'USD', 'EUR', 'JPY', 'GBP'].includes(rawAsset.currency)
+    ? rawAsset.currency
+    : 'KRW') as SupportedCurrency;
+  const confidenceScore = typeof rawAsset.confidenceScore === 'number' ? rawAsset.confidenceScore : 0.95;
+
+  // Try to find matching existing account by institution or account name
+  const matched = existingAccounts.find(acc => {
+    const instMatch = acc.institution.toLowerCase().includes(institution.toLowerCase()) ||
+                      institution.toLowerCase().includes(acc.institution.toLowerCase());
+    const nameMatch = acc.accountName.toLowerCase().includes(accountName.toLowerCase()) ||
+                      accountName.toLowerCase().includes(acc.accountName.toLowerCase());
+    return instMatch || (acc.institution === institution && nameMatch);
+  });
+
+  const action = matched ? 'UPDATE_EXISTING' : 'CREATE_NEW';
+  const explanation = matched
+    ? `기존 '${matched.accountName}' (${matched.institution})의 잔고를 ${totalAccountValue.toLocaleString()} ${currency}로 업데이트합니다.`
+    : `신규 '${institution} - ${accountName}' 계좌를 등록하고 총 자산 ${totalAccountValue.toLocaleString()} ${currency}를 반영합니다.`;
+
+  const mutation: AssetScreenshotMutation = {
+    action,
+    targetAccountId: matched?.id,
+    institution,
+    accountName,
+    totalAccountValue,
+    cashBalance,
+    investedAssets,
+    currency,
+    holdings: rawAsset.holdings,
+    confidenceScore,
+    explanation
+  };
+
+  return {
+    asset: {
+      institution,
+      accountName,
+      assetType: rawAsset.assetType || 'BROKERAGE',
+      currentBalance: totalAccountValue,
+      cashBalance,
+      investedAssets,
+      currency,
+      holdings: rawAsset.holdings,
+      confidenceScore,
+      notes: rawAsset.notes
+    },
+    mutation,
+    matchedExistingAccount: matched,
+    source: data.source || 'gemini'
+  };
+}
+
+export interface AutonomousTextParseResult {
+  transactions: ParsedTransactionResult[];
+  hasLoanSplit: boolean;
+  loanSplitSuggestion?: LoanSplitSuggestion;
+  hasReceivableRecovery: boolean;
+  receivableRecoverySuggestion?: ReceivableRecoverySuggestion;
+  hasCardSettlementDeduplication: boolean;
+  summary: string;
+  source: 'gemini' | 'local_deterministic';
+}
+
+/**
+ * 2. Autonomous Financial Text & Notification Orchestration:
+ * Dispatches input to deterministic heuristics (loan splits, receivable matching, card settlement)
+ * and optionally enhances with Gemini if cloud engine is enabled.
+ */
+export async function orchestrateAutonomousFinancialText(
+  text: string,
+  debts: DebtItem[] = [],
+  engineConfig?: AIEngineConfig
+): Promise<AutonomousTextParseResult> {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return {
+      transactions: [],
+      hasLoanSplit: false,
+      hasReceivableRecovery: false,
+      hasCardSettlementDeduplication: false,
+      summary: '입력된 내용이 없습니다.',
+      source: 'local_deterministic'
+    };
+  }
+
+  // First run local deterministic parser with active debts context
+  const localResults = parseFinancialInputDeterministically(trimmed, debts);
+
+  const loanSplit = localResults.find(r => r.loanSplitSuggestion)?.loanSplitSuggestion;
+  const receivableRecovery = localResults.find(r => r.receivableRecoverySuggestion)?.receivableRecoverySuggestion;
+  const hasCardSettlement = localResults.some(r => r.type === 'TRANSFER' && r.subCategory === '카드대금');
+
+  // If local parser detected high-confidence debt split or card settlement, return immediately
+  if (loanSplit || receivableRecovery || hasCardSettlement) {
+    let summary = '금융 내역이 자동으로 분석되었습니다.';
+    if (loanSplit) {
+      summary = `대출 원리금 상환 감지: 원금 감채 ${loanSplit.principalAmount.toLocaleString()}원 + 이자 비용 ${loanSplit.interestAmount.toLocaleString()}원`;
+    } else if (receivableRecovery) {
+      summary = `${receivableRecovery.counterparty}님 대여금 회수 입금 감지: ${receivableRecovery.recoveredAmount.toLocaleString()}원 채권 차감 (수입 부풀림 방지)`;
+    } else if (hasCardSettlement) {
+      summary = `카드 대금 결제 감지: 내부 이체(TRANSFER)로 처리하여 월간 지출 예산 중복 반영을 방지했습니다.`;
+    }
+
+    return {
+      transactions: localResults,
+      hasLoanSplit: Boolean(loanSplit),
+      loanSplitSuggestion: loanSplit,
+      hasReceivableRecovery: Boolean(receivableRecovery),
+      receivableRecoverySuggestion: receivableRecovery,
+      hasCardSettlementDeduplication: hasCardSettlement,
+      summary,
+      source: 'local_deterministic'
+    };
+  }
+
+  // If engineConfig allows Gemini AI, attempt enhanced parsing
+  if (engineConfig?.engineType !== 'local') {
+    try {
+      const res = await fetch('/api/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: trimmed,
+          engineConfig
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const txs: ParsedTransactionResult[] = data.transactions || [];
+        if (txs.length > 0) {
+          const aiLoanSplit = txs.find(t => t.loanSplitSuggestion)?.loanSplitSuggestion;
+          const aiReceivable = txs.find(t => t.receivableRecoverySuggestion)?.receivableRecoverySuggestion;
+          const aiCardSettlement = txs.some(t => t.type === 'TRANSFER' && (t.subCategory === '카드대금' || t.isInternalTransfer));
+
+          return {
+            transactions: txs,
+            hasLoanSplit: Boolean(aiLoanSplit),
+            loanSplitSuggestion: aiLoanSplit,
+            hasReceivableRecovery: Boolean(aiReceivable),
+            receivableRecoverySuggestion: aiReceivable,
+            hasCardSettlementDeduplication: aiCardSettlement,
+            summary: 'AI 모델을 통해 금융 내역이 정밀 파싱되었습니다.',
+            source: 'gemini'
+          };
+        }
+      }
+    } catch {
+      // Fallback seamlessly to local deterministic parser
+    }
+  }
+
+  return {
+    transactions: localResults,
+    hasLoanSplit: false,
+    hasReceivableRecovery: false,
+    hasCardSettlementDeduplication: false,
+    summary: `${localResults.length}건의 거래 내역이 로컬 파서로 분석되었습니다.`,
+    source: 'local_deterministic'
+  };
+}
+
+/**
+ * 3. Autonomous Execution: One-tap commit of Screenshot Mutation
+ * Directly updates or creates the target AssetAccount in local IndexedDB.
+ */
+export async function commitAutonomousAssetMutation(
+  mutation: AssetScreenshotMutation
+): Promise<AssetAccount> {
+  const existingAccounts = await getAllAssetAccounts();
+  const now = new Date().toISOString();
+
+  let target: AssetAccount;
+
+  if (mutation.action === 'UPDATE_EXISTING' && mutation.targetAccountId) {
+    const existing = existingAccounts.find(a => a.id === mutation.targetAccountId);
+    if (!existing) {
+      throw new Error(`대상 자산 계좌(${mutation.targetAccountId})를 찾을 수 없습니다.`);
+    }
+
+    target = {
+      ...existing,
+      currentBalance: mutation.totalAccountValue,
+      cashBalance: mutation.cashBalance !== undefined ? mutation.cashBalance : existing.cashBalance,
+      investedAssets: mutation.investedAssets !== undefined ? mutation.investedAssets : existing.investedAssets,
+      currency: mutation.currency,
+      lastUpdated: now,
+      note: `${now.slice(0, 10)} 스크린샷 자동 동기화`,
+      holdings: mutation.holdings || existing.holdings
+    };
+  } else {
+    // Create new AssetAccount
+    target = {
+      id: `acc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      accountName: mutation.accountName,
+      institution: mutation.institution,
+      assetType: 'BROKERAGE',
+      currency: mutation.currency,
+      currentBalance: mutation.totalAccountValue,
+      cashBalance: mutation.cashBalance,
+      investedAssets: mutation.investedAssets,
+      lastUpdated: now,
+      note: '스크린샷 OCR 자동 등록',
+      holdings: mutation.holdings
+    };
+  }
+
+  await saveAssetAccount(target);
+  return target;
+}
+
+/**
+ * 4. Autonomous Execution: One-tap Loan Repayment Split
+ * Executes atomic principal reduction and interest expense logging.
+ */
+export async function commitAutonomousLoanSplit(
+  suggestion: LoanSplitSuggestion,
+  paymentMethod?: string
+): Promise<{ principalTx: Transaction; interestTx?: Transaction; updatedDebt: DebtItem }> {
+  const res = await executeLoanRepaymentSplit(
+    suggestion.debtId,
+    suggestion.principalAmount,
+    suggestion.interestAmount,
+    suggestion.currency,
+    paymentMethod || suggestion.counterpartyOrBank
+  );
+  return {
+    principalTx: res.principalTransaction,
+    interestTx: res.interestTransaction,
+    updatedDebt: res.updatedDebt
+  };
+}
+
+/**
+ * 5. Autonomous Execution: One-tap Receivable Recovery
+ * Executes atomic receivable settlement, reducing debt without inflating income.
+ */
+export async function commitAutonomousReceivableRecovery(
+  suggestion: ReceivableRecoverySuggestion,
+  paymentMethod?: string
+): Promise<{ settlementTx: Transaction; updatedDebt: DebtItem }> {
+  const res = await executeReceivableRecovery(
+    suggestion.debtId,
+    suggestion.recoveredAmount,
+    suggestion.currency,
+    paymentMethod || suggestion.counterparty
+  );
+  return {
+    settlementTx: res.settlementTransaction,
+    updatedDebt: res.updatedDebt
+  };
 }

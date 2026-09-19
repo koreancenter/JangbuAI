@@ -117,6 +117,7 @@ export function useBudgetAnalytics({
     let expense = 0;
 
     for (const t of currentMonthTransactions) {
+      if (t.isInternalTransfer) continue;
       const converted = getAmountInSelectedCurrency(t);
       if (t.type === 'INCOME' || t.type === 'SETTLEMENT') {
         income += converted;
@@ -181,7 +182,7 @@ export function useBudgetAnalytics({
     }
 
     for (const t of currentMonthTransactions) {
-      if (t.type !== 'EXPENSE') continue;
+      if (t.type !== 'EXPENSE' || t.isInternalTransfer) continue;
       try {
         const d = getDate(parseISO(t.date));
         if (dayMap[d]) {
@@ -237,6 +238,7 @@ export function useBudgetAnalytics({
       let expense = 0;
 
       for (const t of transactions) {
+        if (t.isInternalTransfer) continue;
         try {
           const tDate = parseISO(t.date);
           if (tDate.getFullYear() === mYear && tDate.getMonth() === mMonth) {
@@ -271,7 +273,7 @@ export function useBudgetAnalytics({
 
     let prevExpense = 0;
     for (const t of transactions) {
-      if (t.type !== 'EXPENSE') continue;
+      if (t.type !== 'EXPENSE' || t.isInternalTransfer) continue;
       try {
         if (isSameMonth(parseISO(t.date), prevMonthDate)) {
           prevExpense += getAmountInSelectedCurrency(t);
