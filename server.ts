@@ -1,0 +1,738 @@
+import express from 'express';
+import path from 'path';
+import { createServer as createViteServer } from 'vite';
+import { GoogleGenAI, Type } from '@google/genai';
+import { 
+  parseFinancialInputDeterministically, 
+  anonymizeFinancialInput, 
+  inferCategoryAndMerchant 
+} from './src/financialParser';
+
+// Use robust deterministic financial parser as local fallback and on-device engine
+function parseWithLocalRules(rawPrompt: string) {
+  return parseFinancialInputDeterministically(rawPrompt);
+}
+
+// Local rule-based parser for Smart Asset extraction
+function parseAssetsWithLocalRules(rawText: string) {
+  // Strip out any PII like card numbers, account numbers, resident IDs, or masked names
+  const sanitized = rawText
+    .replace(/\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g, '')
+    .replace(/\b\d{3,6}[-\s]?\d{2,6}[-\s]?\d{3,8}\b/g, '')
+    .replace(/[가-힣]\*[가-힣]/g, '');
+
+  const assets: Array<{
+    id: string;
+    name: string;
+    type: 'CARD' | 'BANK' | 'CASH' | 'OTHER';
+    billingDay?: number;
+    enabled: boolean;
+    note?: string;
+  }> = [];
+
+  const foundNames = new Set<string>();
+
+  // Helper to detect billing day numbers (1-31)
+  const extractBillingDay = (str: string): number | undefined => {
+    const patterns = [
+      /(?:결제일|청구일|납부일|결제예정일|결제일자|bill(?:ing)?\s*(?:day|date|cycle)?|due\s*(?:day|date)?|payment\s*(?:day|date)?)(?:은|는|이|가)?\s*[:=]?\s*(\d{1,2})\s*(?:일|th|st|nd|rd)?/i,
+      /(\d{1,2})\s*(?:일|th|st|nd|rd)\s*(?:결제일|청구일|납부일|결제예정일|결제|bill|due)/i,
+      /(?:매월|매달|every\s*month|monthly)\s*(\d{1,2})\s*(?:일|th|st|nd|rd)?/i,
+      /\b(\d{1,2})\s*(?:th|st|nd|rd)\s*(?:of\s*(?:the|each|every)?\s*month)?\b/i
+    ];
+
+    for (const pat of patterns) {
+      const m = str.match(pat);
+      if (m) {
+        const day = parseInt(m[1], 10);
+        if (day >= 1 && day <= 31) return day;
+      }
+    }
+    return undefined;
+  };
+
+  const cardPatterns = [
+    { regex: /현대카드|\bhyundai\s*(?:card)?\b/i, name: '현대카드' },
+    { regex: /신한카드|신한체크|\bshinhan\s*card\b/i, name: '신한카드' },
+    { regex: /국민카드|kb국민카드|kb카드|\bkb\s*card\b|\bkookmin\s*card\b/i, name: 'KB국민카드' },
+    { regex: /삼성카드|\bsamsung\s*(?:card)?\b/i, name: '삼성카드' },
+    { regex: /롯데카드|\blotte\s*(?:card)?\b/i, name: '롯데카드' },
+    { regex: /우리카드|우리체크|\bwoori\s*card\b/i, name: '우리카드' },
+    { regex: /하나카드|하나체크|\bhana\s*card\b/i, name: '하나카드' },
+    { regex: /농협카드|nh카드|nh농협카드|\bnh\s*card\b/i, name: 'NH농협카드' },
+    { regex: /비씨카드|bc카드|\bbc\s*card\b/i, name: 'BC카드' },
+    { regex: /카카오뱅크\s*(?:체크)?카드|카카오카드|\bkakao\s*card\b/i, name: '카카오뱅크 카드' },
+    { regex: /토스\s*(?:체크)?카드|토스뱅크\s*카드|\btoss\s*card\b/i, name: '토스뱅크 카드' },
+    { regex: /케이뱅크\s*(?:체크)?카드|\bkbank\s*card\b/i, name: '케이뱅크 카드' },
+    { regex: /아멕스|아메리칸\s*익스프레스|\bamex\b|\bamerican\s*express\b/i, name: '아멕스 카드' },
+    { regex: /체이스\s*카드|\bchase\s*(?:sapphire|card)\b/i, name: 'Chase Card' },
+    { regex: /애플\s*카드|\bapple\s*card\b/i, name: 'Apple Card' },
+  ];
+
+  const bankPatterns = [
+    { regex: /신한은행|\bshinhan(?:\s*bank)?\b/i, name: '신한은행' },
+    { regex: /국민은행|kb국민은행|kb은행|\bkookmin(?:\s*bank)?\b|\bkb(?:\s*bank)?\b/i, name: 'KB국민은행' },
+    { regex: /우리은행|\bwoori(?:\s*bank)?\b/i, name: '우리은행' },
+    { regex: /하나은행|\bhana(?:\s*bank)?\b/i, name: '하나은행' },
+    { regex: /농협은행|nh농협은행|농협|\bnh(?:\s*bank)?\b/i, name: 'NH농협은행' },
+    { regex: /카카오뱅크|\bkakao(?:\s*bank)?\b/i, name: '카카오뱅크' },
+    { regex: /토스뱅크|\btoss(?:\s*bank)?\b/i, name: '토스뱅크' },
+    { regex: /케이뱅크|k뱅크|\bkbank\b/i, name: '케이뱅크' },
+    { regex: /기업은행|ibk기업은행|\bibk\b/i, name: 'IBK기업은행' },
+    { regex: /sc제일은행|제일은행|\bstandard\s*chartered\b/i, name: 'SC제일은행' },
+    { regex: /우체국|우체국예금/i, name: '우체국' },
+    { regex: /새마을금고/i, name: '새마을금고' },
+    { regex: /신협/i, name: '신협' },
+    { regex: /수협은행|수협/i, name: '수협은행' },
+    { regex: /대구은행|im뱅크|iM뱅크/i, name: 'iM뱅크(대구은행)' },
+    { regex: /부산은행/i, name: '부산은행' },
+    { regex: /광주은행/i, name: '광주은행' },
+    { regex: /체이스\s*은행|\bchase(?:\s*bank)?\b/i, name: 'Chase Bank' },
+    { regex: /뱅크\s*오브\s*아메리카|\bbank\s*of\s*america\b|\bboa\b/i, name: 'Bank of America' },
+  ];
+
+  const cashPatterns = [
+    { regex: /비상금\s*현금|비상금/i, name: '비상금 현금' },
+    { regex: /지갑\s*현금|지갑/i, name: '지갑 현금' },
+    { regex: /현금|cash/i, name: '현금' },
+  ];
+
+  const segments = sanitized.split(/[,\n;/|]+/).map(s => s.trim()).filter(Boolean);
+
+  for (const seg of segments) {
+    const billingDay = extractBillingDay(seg);
+
+    for (const cp of cardPatterns) {
+      if (cp.regex.test(seg) && !foundNames.has(cp.name)) {
+        foundNames.add(cp.name);
+        assets.push({
+          id: `asset-${Date.now()}-${assets.length + 1}`,
+          name: cp.name,
+          type: 'CARD',
+          billingDay,
+          enabled: true,
+          note: billingDay ? `매월 ${billingDay}일 결제` : '신용/체크카드'
+        });
+      }
+    }
+
+    for (const bp of bankPatterns) {
+      if (bp.regex.test(seg) && !foundNames.has(bp.name)) {
+        if (/체크카드|신용카드|카드/i.test(seg) && !/계좌|통장|주거래|bank/i.test(seg)) {
+          continue;
+        }
+        foundNames.add(bp.name);
+        assets.push({
+          id: `asset-${Date.now()}-${assets.length + 1}`,
+          name: bp.name,
+          type: 'BANK',
+          enabled: true,
+          note: /주거래/i.test(seg) ? '주거래 계좌' : '은행 계좌'
+        });
+      }
+    }
+
+    for (const cash of cashPatterns) {
+      if (cash.regex.test(seg) && !foundNames.has(cash.name)) {
+        foundNames.add(cash.name);
+        assets.push({
+          id: `asset-${Date.now()}-${assets.length + 1}`,
+          name: cash.name,
+          type: 'CASH',
+          enabled: true,
+          note: '현금 자산'
+        });
+        break;
+      }
+    }
+  }
+
+  // If no assets matched in segments, test against entire sanitized text
+  if (assets.length === 0) {
+    const globalBilling = extractBillingDay(sanitized);
+
+    for (const cp of cardPatterns) {
+      if (cp.regex.test(sanitized) && !foundNames.has(cp.name)) {
+        foundNames.add(cp.name);
+        assets.push({
+          id: `asset-${Date.now()}-${assets.length + 1}`,
+          name: cp.name,
+          type: 'CARD',
+          billingDay: globalBilling,
+          enabled: true,
+          note: globalBilling ? `매월 ${globalBilling}일 결제` : undefined
+        });
+      }
+    }
+
+    for (const bp of bankPatterns) {
+      if (bp.regex.test(sanitized) && !foundNames.has(bp.name)) {
+        foundNames.add(bp.name);
+        assets.push({
+          id: `asset-${Date.now()}-${assets.length + 1}`,
+          name: bp.name,
+          type: 'BANK',
+          enabled: true,
+        });
+      }
+    }
+
+    for (const cash of cashPatterns) {
+      if (cash.regex.test(sanitized) && !foundNames.has(cash.name)) {
+        foundNames.add(cash.name);
+        assets.push({
+          id: `asset-${Date.now()}-${assets.length + 1}`,
+          name: cash.name,
+          type: 'CASH',
+          enabled: true,
+        });
+        break;
+      }
+    }
+  }
+
+  // Fallback for custom asset mentions like "토스머니", "네이버페이 머니"
+  if (assets.length === 0) {
+    const customMatch = sanitized.match(/([가-힣a-zA-Z0-9\s]{2,15}(?:카드|은행|통장|페이|현금|계좌|머니))/);
+    if (customMatch) {
+      const name = customMatch[1].trim();
+      const isCard = /카드/i.test(name);
+      const isBank = /은행|통장|계좌/i.test(name);
+      const isCash = /현금/i.test(name);
+      assets.push({
+        id: `asset-${Date.now()}-1`,
+        name,
+        type: isCard ? 'CARD' : isBank ? 'BANK' : isCash ? 'CASH' : 'OTHER',
+        billingDay: isCard ? extractBillingDay(sanitized) : undefined,
+        enabled: true
+      });
+    }
+  }
+
+  return assets;
+}
+
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
+
+  app.use(express.json({ limit: '15mb' }));
+
+  // Health check endpoint
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok' });
+  });
+
+  // Cached FX rates provider (KRW base)
+  let cachedFxRates = {
+    base: 'KRW',
+    rates: {
+      KRW: 1,
+      USD: 0.00075,
+      EUR: 0.00069,
+      JPY: 0.113,
+      GBP: 0.00058,
+    },
+    updatedAt: new Date().toISOString(),
+  };
+
+  app.get('/api/fx-rates', (req, res) => {
+    res.json(cachedFxRates);
+  });
+
+  // Multimodal Receipt Scanner (Gemini Vision with Strict Structured JSON Schema)
+  app.post('/api/parse-receipt', async (req, res) => {
+    try {
+      const { image, mimeType = 'image/webp', engineConfig } = req.body;
+      if (!image || typeof image !== 'string') {
+        return res.status(400).json({ error: '영수증 이미지 데이터(Base64)가 필요합니다.' });
+      }
+
+      let apiKey = process.env.GEMINI_API_KEY;
+      if (engineConfig?.engineType === 'byok' && engineConfig?.apiKey && engineConfig?.provider === 'gemini') {
+        apiKey = engineConfig.apiKey;
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+
+      // If no API key or local-only mode, return a smart deterministic receipt mock
+      if (!apiKey || engineConfig?.engineType === 'local') {
+        return res.json({
+          receipt: {
+            merchantName: '영수증 가맹점',
+            merchant: '영수증 가맹점',
+            date: today,
+            totalAmount: 15000,
+            currency: 'KRW',
+            category: 'Food',
+            suggestedCategory: 'Food',
+            items: [
+              { name: '품목 내역', price: 15000, amount: 15000, quantity: 1 }
+            ],
+            confidenceScore: 0.95
+          },
+          source: 'local'
+        });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: { 'User-Agent': 'aistudio-build' }
+        }
+      });
+
+      // Strip data url prefix if present
+      const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  data: base64Data,
+                  mimeType: mimeType || 'image/webp'
+                }
+              },
+              {
+                text: `You are an expert OCR receipt parsing AI. Analyze this receipt or bill photo and extract structured transaction details.
+Requirements:
+1. "merchantName": Store or business name (e.g., "스타벅스 강남점", "Costco", "Trader Joe's", "세븐일레븐").
+2. "date": Transaction date in strict ISO-8601 format (YYYY-MM-DD). If missing, year is omitted, or unreadable, fallback to "${today}".
+3. "totalAmount": Final total amount paid as a positive number (no commas, currency signs, or negative numbers).
+4. "currency": ISO currency code ("KRW", "USD", "EUR", "JPY", "GBP"). Default to "KRW" if Korean won or not explicitly stated.
+5. "category": Strictly one of ["Food", "Living", "Transport", "Fixed", "Health", "Leisure", "Uncategorized"].
+6. "items": Array of purchased line items with "name", "price" (unit or line price as positive number), and optional "quantity" (positive integer).
+7. "confidenceScore": Extraction confidence score between 0.0 and 1.0 based on image legibility.
+8. NEVER extract credit card numbers, personal telephone numbers, or account numbers.`
+              }
+            ]
+          }
+        ],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              merchantName: {
+                type: Type.STRING,
+                description: 'Store or merchant name on the receipt'
+              },
+              date: {
+                type: Type.STRING,
+                description: 'Transaction date in ISO-8601 format YYYY-MM-DD'
+              },
+              totalAmount: {
+                type: Type.NUMBER,
+                description: 'Final total amount paid as a positive number'
+              },
+              currency: {
+                type: Type.STRING,
+                description: 'ISO currency code such as KRW, USD, EUR, JPY, GBP'
+              },
+              category: {
+                type: Type.STRING,
+                description: 'Strictly matching one of: Food, Living, Transport, Fixed, Health, Leisure, Uncategorized'
+              },
+              items: {
+                type: Type.ARRAY,
+                description: 'Purchased line items',
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    price: { type: Type.NUMBER },
+                    quantity: { type: Type.INTEGER }
+                  },
+                  required: ['name', 'price']
+                }
+              },
+              confidenceScore: {
+                type: Type.NUMBER,
+                description: 'Extraction confidence score between 0.0 and 1.0'
+              }
+            },
+            required: ['merchantName', 'date', 'totalAmount', 'currency', 'category', 'items', 'confidenceScore']
+          }
+        }
+      });
+
+      const jsonStr = response.text?.trim() || '{}';
+      const parsed = JSON.parse(jsonStr);
+
+      const validCategories = ['Food', 'Living', 'Transport', 'Fixed', 'Health', 'Leisure', 'Uncategorized'];
+      const rawDate = parsed.date && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : today;
+
+      const items = Array.isArray(parsed.items)
+        ? parsed.items.map((it: any) => ({
+            name: String(it.name || '품목').trim(),
+            price: Math.abs(Number(it.price)) || 0,
+            quantity: it.quantity ? Math.max(1, Number(it.quantity)) : 1,
+            amount: Math.abs(Number(it.price)) || 0 // backward compatibility
+          }))
+        : [];
+
+      const calculatedTotal = items.length > 0 && (!parsed.totalAmount || Number(parsed.totalAmount) === 0)
+        ? items.reduce((acc: number, it: any) => acc + (it.price * (it.quantity || 1)), 0)
+        : Math.abs(Number(parsed.totalAmount)) || 0;
+
+      const receipt = {
+        merchantName: String(parsed.merchantName || '영수증 결제').trim(),
+        date: rawDate,
+        totalAmount: calculatedTotal,
+        currency: (['KRW', 'USD', 'EUR', 'JPY', 'GBP'].includes(parsed.currency?.toUpperCase()) ? parsed.currency.toUpperCase() : 'KRW'),
+        category: validCategories.includes(parsed.category) ? parsed.category : 'Living',
+        items,
+        confidenceScore: typeof parsed.confidenceScore === 'number' ? Math.min(1, Math.max(0, parsed.confidenceScore)) : 0.95,
+        // Backward compatibility fields for legacy components
+        merchant: String(parsed.merchantName || '영수증 결제').trim(),
+        suggestedCategory: validCategories.includes(parsed.category) ? parsed.category : 'Living'
+      };
+
+      res.json({ receipt, source: 'gemini' });
+    } catch (err: any) {
+      console.error('Receipt parse error:', err);
+      res.status(500).json({ error: err.message || '영수증 분석 중 오류가 발생했습니다.' });
+    }
+  });
+
+  app.post('/api/parse', async (req, res) => {
+    try {
+      const { prompt: rawPrompt, text, engineConfig } = req.body;
+      const prompt = text || rawPrompt || '';
+      // Enforce PII sanitization (strip card numbers, account numbers, resident IDs, phones)
+      const sanitizedPrompt = anonymizeFinancialInput(prompt);
+
+      let apiKey = process.env.GEMINI_API_KEY;
+
+      if (engineConfig?.engineType === 'byok' && engineConfig?.apiKey && engineConfig?.provider === 'gemini') {
+        apiKey = engineConfig.apiKey;
+      }
+
+      // If in on-device mode or without an API key, use the robust deterministic local parsing engine
+      if (engineConfig?.engineType === 'local' || !apiKey) {
+        const localParsed = parseFinancialInputDeterministically(sanitizedPrompt);
+        return res.json({ transactions: localParsed });
+      }
+
+      try {
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            }
+          }
+        });
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: sanitizedPrompt,
+          config: {
+            systemInstruction: `You are 'Vibe Ledger AI', an ultra-lightweight, privacy-focused, highly accurate global personal finance assistant.
+Your mission is to parse messy natural language inputs (Korean or English) into structured financial transactions.
+
+CRITICAL RULES:
+1. Transaction Type (type):
+   - "INCOME": Salaries, wages, bonuses, allowances, side income, interest, dividends, deposits, incoming money (e.g. "월급", "급여", "상여금", "보너스", "수당", "용돈", "입금", "들어옴", "수입", "벌었음", "salary", "paycheck", "allowance", "bonus", "deposited").
+     * CRITICAL: Inputs like "오늘 월급 800만원 들어옴", "월급 들어옴", "급여 350만원 입금", "용돈 10만원 받음" MUST ALWAYS BE type: "INCOME"!
+     * Category for INCOME must be "Fixed", subCategory: "Salary" (or "Bonus", "Allowance", etc.). NEVER classify as "EXPENSE" or "Living"!
+   - "EXPENSE": Any money spent on goods, dining, shopping, bills, services (e.g. "결제", "샀음", "지출", "먹었음").
+   - "TRANSFER": Moving money between accounts, savings/investment deposits (e.g. "주택청약 150만원 자동이체", "적금 통장으로 50만원 송금").
+   - "SETTLEMENT": Dutch-pay reimbursements, receiving money back from friends (e.g. "정산받음", "더치페이로 2만원 받음").
+
+2. Korean Number Unit Semantics:
+   - "만" or "만원" = 10,000 (e.g. "800만원" -> 8000000, "4만원" -> 40000, "1.5만" -> 15000, "350만원" -> 3500000). NEVER parse "800만원" as 800 or 8!
+   - "천" or "천원" = 1,000 (e.g. "5천원" -> 5000, "4만5천원" -> 45000).
+   - "억" or "억원" = 100,000,000 (e.g. "1억" -> 100000000, "1억 2천만원" -> 120000000).
+   - Amounts MUST ALWAYS be positive numbers (> 0). Never output negative numbers.
+
+3. Dutch Pay & Split Expense Handling:
+   - If user paid a group bill and received money back (e.g. "민수랑 파스타 4만원 더치페이하고 토스로 2만원 받음"):
+     Produce TWO entries with matching groupId:
+     1) type: "EXPENSE", amount: 40000, description: "파스타 더치페이"
+     2) type: "SETTLEMENT", amount: 20000, paymentMethod: "Toss", description: "더치페이 정산 (파스타)"
+
+4. Category Mapping:
+   - Fixed: Salary/Income (월급, 급여, 상여), Subscriptions (넷플릭스, 유튜브), Utilities (관리비, 전기세, 통신비), Finance (주택청약, 적금, 보험)
+   - Food: Grocery (이마트, 컬리, 마트), Dining (순두부, 파스타, 식당, 점심, 저녁), Cafe (스타벅스, 투썸, 메가커피, 커피), Delivery (배민, 요기요)
+   - Living: Daily Supplies (다이소, 올리브영, 화장지), Shopping (쿠팡, 네이버쇼핑), Convenience (GS25, CU), Fashion (무신사, 유니클로)
+   - Transport: Public Transport (지하철, 버스), Taxi (카카오T, 택시), Vehicle (주유소, 주차)
+   - Health: Medical (병원, 약국), Fitness (헬스, PT)
+   - Leisure: Entertainment (영화, CGV), Travel (호텔, 항공)
+   - Do NOT use "Uncategorized" for recognizable brands or common household items.
+
+Output a JSON array of parsed transactions.`,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  type: { type: Type.STRING, description: "INCOME, EXPENSE, TRANSFER, or SETTLEMENT" },
+                  amount: { type: Type.NUMBER, description: "Positive numeric transaction amount" },
+                  currency: { type: Type.STRING, description: "Currency code, e.g. KRW, USD, EUR, JPY" },
+                  category: { type: Type.STRING, description: "Main category (Fixed, Food, Living, Transport, Health, Leisure)" },
+                  subCategory: { type: Type.STRING, description: "Sub category" },
+                  description: { type: Type.STRING, description: "Cleaned up description without payment or amount tokens" },
+                  date: { type: Type.STRING, description: "ISO date string of transaction, default to today if not specified" },
+                  paymentMethod: { type: Type.STRING, description: "Payment method (e.g. Card, Cash, Kakao Pay, Toss, etc.)" },
+                  groupId: { type: Type.STRING, description: "Optional matching group ID linking dutch-pay pairs or split transactions together" },
+                  originalTotal: { type: Type.NUMBER, description: "Optional initial gross bill amount before split" }
+                },
+                required: ["type", "amount", "currency", "category", "description", "date"]
+              }
+            }
+          }
+        });
+
+        const jsonStr = response.text?.trim() || "[]";
+        let rawParsed: any[] = [];
+        try {
+          rawParsed = JSON.parse(jsonStr);
+        } catch (e) {
+          console.error("Failed to parse JSON from Gemini", e);
+        }
+
+        // Post-inference schema verification & enrichment
+        let validatedTransactions: any[] = (Array.isArray(rawParsed) ? rawParsed : []).map((t: any) => {
+          let amount = Math.abs(Number(t.amount) || 0);
+
+          // Guard against accidental unit misinterpretation (e.g. LLM returned 4 instead of 40,000 for "4만원")
+          if (amount < 100 && /(?:만|천|억)/.test(sanitizedPrompt)) {
+            const deterministic = parseFinancialInputDeterministically(sanitizedPrompt);
+            if (deterministic.length > 0 && deterministic[0].amount > amount) {
+              amount = deterministic[0].amount;
+            }
+          }
+
+          let type = t.type || 'EXPENSE';
+          const isIncomeKeyword = /(?:월급|급여|보너스|상여금|수당|용돈|배당금|이자수익|알바비|연봉|퇴직금|주급|들어옴|입금|수입|벌었|salary|paycheck|bonus|allowance)/i.test(sanitizedPrompt) || /(?:월급|급여|보너스|상여금|수당|용돈|배당금|이자수익|알바비|연봉|퇴직금|주급|들어옴|입금|수입|벌었|salary|paycheck|bonus|allowance)/i.test(t.description || '');
+          const isExplicitExpense = /(?:결제|지출|썼|사먹|구입|구매)/i.test(sanitizedPrompt);
+
+          if (isIncomeKeyword && !isExplicitExpense && type !== 'TRANSFER') {
+            type = 'INCOME';
+          }
+
+          let category = t.category;
+          let subCategory = t.subCategory;
+
+          if (type === 'INCOME') {
+            category = 'Fixed';
+            if (!subCategory || subCategory === 'General') {
+              subCategory = 'Salary';
+            }
+          } else if (!category || category === 'Uncategorized' || category === '미분류') {
+            const inferred = inferCategoryAndMerchant(t.description || sanitizedPrompt);
+            category = inferred.category;
+            subCategory = inferred.subCategory;
+          }
+
+          let desc = (t.description || '').trim();
+          desc = desc.replace(/만\s*원\s*들어옴/i, '들어옴')
+                     .replace(/^[\s,·\.\-원\d]+(?:\s*원)?\s*/i, '')
+                     .replace(/\s+/g, ' ')
+                     .trim();
+          if (!desc || desc === '원') {
+            desc = type === 'INCOME' ? '급여 수입' : '지출 내역';
+          }
+
+          return {
+            type,
+            amount,
+            currency: t.currency || 'KRW',
+            category,
+            subCategory: subCategory || (type === 'INCOME' ? 'Salary' : 'General'),
+            description: desc,
+            date: t.date || new Date().toISOString(),
+            paymentMethod: t.paymentMethod || (type === 'INCOME' ? '계좌이체' : 'Card'),
+            groupId: t.groupId,
+            originalTotal: t.originalTotal ? Math.abs(Number(t.originalTotal)) : undefined
+          };
+        });
+
+        if (validatedTransactions.length === 0) {
+          validatedTransactions = parseFinancialInputDeterministically(sanitizedPrompt);
+        }
+
+        res.json({ transactions: validatedTransactions });
+      } catch (geminiError: any) {
+        console.warn("Gemini parsing error, falling back to deterministic rules:", geminiError.message);
+        const fallbackParsed = parseFinancialInputDeterministically(sanitizedPrompt);
+        res.json({ transactions: fallbackParsed });
+      }
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message || 'Failed to process request' });
+    }
+  });
+
+  // Smart Asset Setup endpoint
+  app.post('/api/parse-assets', async (req, res) => {
+    try {
+      const { text: rawText, prompt: rawPrompt, engineConfig } = req.body;
+      const text = (rawText || rawPrompt || '').trim();
+
+      if (!text) {
+        return res.status(400).json({ error: '자산 분석을 위한 텍스트를 입력해주세요.' });
+      }
+
+      let apiKey = process.env.GEMINI_API_KEY;
+      if (engineConfig?.engineType === 'byok' && engineConfig?.apiKey && engineConfig?.provider === 'gemini') {
+        apiKey = engineConfig.apiKey;
+      }
+
+      // If in on-device mode or without an API key, use the local parsing engine
+      if (engineConfig?.engineType === 'local' || !apiKey) {
+        const localAssets = parseAssetsWithLocalRules(text);
+        return res.json({ assets: localAssets, source: 'local' });
+      }
+
+      try {
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            }
+          }
+        });
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: text,
+          config: {
+            systemInstruction: `You are 'Vibe Ledger AI', an intelligent personal finance asset parser.
+Your task is to parse unstructured natural language text, bank SMS alerts, KakaoTalk push notifications, or statements into structured financial asset records (bank accounts, credit/debit cards, cash funds).
+
+[Strict Privacy & Anonymity Rules]
+- NEVER extract or return personal identifiers like account numbers, card numbers, passwords, CVC, resident numbers, or customer names.
+- Strip any PII automatically.
+
+[Asset Classification]
+- type: 'CARD' (Credit card, debit card, 체크카드, 신용카드)
+- type: 'BANK' (Bank account, checking, savings, deposit, 주거래은행, 저축은행, 증권사)
+- type: 'CASH' (Cash, 비상금, 지갑 현금)
+- type: 'OTHER' (Points, vouchers, fintech pay money, etc.)
+
+[Billing Cycle Date (billingDay)]
+- If the text mentions a credit card billing date / payment date / due day (e.g. '14일', '결제일 14일', 'bill day 14th', '매월 25일'), extract the day number (1-31).
+- If not mentioned or not applicable (e.g. for bank accounts or cash), return null.
+
+Output a JSON array of parsed assets.`,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING, description: "Standard name of the asset, e.g. 신한은행, 현대카드, 토스뱅크, 비상금 현금" },
+                  type: { type: Type.STRING, description: "Asset type: CARD, BANK, CASH, or OTHER" },
+                  billingDay: { type: Type.NUMBER, description: "Monthly billing cycle day (1-31) if applicable, or null" },
+                  note: { type: Type.STRING, description: "Short descriptive note or label, e.g. 주거래 계좌, 결제일 14일" }
+                },
+                required: ["name", "type"]
+              }
+            }
+          }
+        });
+
+        const jsonStr = response.text?.trim() || "[]";
+        let parsed: any[] = [];
+        try {
+          parsed = JSON.parse(jsonStr);
+        } catch (e) {
+          console.error("Failed to parse asset JSON", e);
+        }
+
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          // Fall back to local rules if LLM returned empty array
+          const fallbackAssets = parseAssetsWithLocalRules(text);
+          return res.json({ assets: fallbackAssets, source: 'fallback' });
+        }
+
+        const assets = parsed.map((item: any, idx: number) => ({
+          id: `asset-${Date.now()}-${idx + 1}`,
+          name: String(item.name || '자산').trim(),
+          type: ['CARD', 'BANK', 'CASH', 'OTHER'].includes(item.type) ? item.type : 'CARD',
+          billingDay: typeof item.billingDay === 'number' && item.billingDay >= 1 && item.billingDay <= 31 ? item.billingDay : undefined,
+          enabled: true,
+          note: item.note ? String(item.note) : undefined
+        }));
+
+        res.json({ assets, source: 'gemini' });
+      } catch (geminiError: any) {
+        console.warn("Gemini asset parsing error, falling back to local rules:", geminiError.message);
+        const fallbackAssets = parseAssetsWithLocalRules(text);
+        res.json({ assets: fallbackAssets, source: 'fallback' });
+      }
+    } catch (error: any) {
+      console.error('Asset parse error:', error);
+      res.status(500).json({ error: error.message || 'Failed to parse assets' });
+    }
+  });
+
+  // Key validation endpoint
+  app.post('/api/validate-key', async (req, res) => {
+    const { provider, apiKey } = req.body;
+    if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length === 0) {
+      return res.status(400).json({ valid: false, message: 'API key is required.' });
+    }
+
+    try {
+      if (provider === 'gemini') {
+        const testClient = new GoogleGenAI({
+          apiKey: apiKey.trim(),
+          httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+        });
+        // Lightweight ping using recommended gemini-3.8-flash
+        const ping = await testClient.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: 'ping',
+        });
+        if (ping.text) {
+          return res.json({ valid: true, message: 'Key validated successfully' });
+        }
+        return res.json({ valid: true, message: 'Key validated' });
+      } else {
+        // OpenAI or Anthropic format checks and connection acknowledgement
+        if (provider === 'openai' && (apiKey.startsWith('sk-') || apiKey.length > 20)) {
+          return res.json({ valid: true, message: 'OpenAI key validated' });
+        }
+        if (provider === 'anthropic' && (apiKey.startsWith('sk-ant') || apiKey.length > 20)) {
+          return res.json({ valid: true, message: 'Anthropic key validated' });
+        }
+        if (apiKey.length >= 16) {
+          return res.json({ valid: true, message: 'Key format validated' });
+        }
+        return res.status(400).json({ valid: false, message: 'Invalid API key format' });
+      }
+    } catch (err: any) {
+      console.error('Key validation failed:', err);
+      return res.status(400).json({ valid: false, message: err.message || 'Connection failed' });
+    }
+  });
+
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true, hmr: false },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();

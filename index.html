@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <script>
+      // Gracefully prevent [vite] websocket connection failure logs in sandboxed iframe environments
+      (function() {
+        if (typeof window === 'undefined') return;
+
+        // 1. Mock vite-hmr WebSocket so @vite/client never fails or logs errors
+        try {
+          const OrigWebSocket = window.WebSocket;
+          if (OrigWebSocket) {
+            window.WebSocket = function(url, protocols) {
+              const urlStr = typeof url === 'string' ? url : (url && url.href ? url.href : String(url));
+              const isViteHmr = protocols === 'vite-hmr' || 
+                (Array.isArray(protocols) && protocols.includes('vite-hmr')) ||
+                (urlStr && (urlStr.includes('token=') || urlStr.includes('vite-hmr')));
+              
+              if (isViteHmr) {
+                const target = new EventTarget();
+                target.url = urlStr;
+                target.readyState = 1; // WebSocket.OPEN
+                target.send = function() {};
+                target.close = function() { target.readyState = 3; };
+                setTimeout(() => {
+                  if (typeof target.onopen === 'function') target.onopen(new Event('open'));
+                  target.dispatchEvent(new Event('open'));
+                }, 0);
+                return target;
+              }
+              return new OrigWebSocket(url, protocols);
+            };
+            window.WebSocket.prototype = OrigWebSocket.prototype;
+            window.WebSocket.CONNECTING = 0;
+            window.WebSocket.OPEN = 1;
+            window.WebSocket.CLOSING = 2;
+            window.WebSocket.CLOSED = 3;
+          }
+        } catch (e) {}
+
+        // 2. Intercept console logs containing [vite]
+        const checkIsVite = function(args) {
+          for (let i = 0; i < args.length; i++) {
+            const a = args[i];
+            const str = typeof a === 'string' ? a : (a && a.message ? a.message : String(a));
+            if (/\[vite\]|websocket/i.test(str)) return true;
+          }
+          return false;
+        };
+
+        const originalWarn = console.warn;
+        const originalError = console.error;
+        const originalInfo = console.info;
+        const originalDebug = console.debug;
+
+        console.warn = function(...args) {
+          if (checkIsVite(args)) return;
+          return originalWarn.apply(console, args);
+        };
+        console.error = function(...args) {
+          if (checkIsVite(args)) return;
+          return originalError.apply(console, args);
+        };
+        if (originalInfo) {
+          console.info = function(...args) {
+            if (checkIsVite(args)) return;
+            return originalInfo.apply(console, args);
+          };
+        }
+        if (originalDebug) {
+          console.debug = function(...args) {
+            if (checkIsVite(args)) return;
+            return originalDebug.apply(console, args);
+          };
+        }
+
+        // 3. Catch window errors & unhandled promise rejections
+        window.addEventListener('error', function(event) {
+          const msg = event.message || (event.error && event.error.message) || String(event);
+          if (/\[vite\]|websocket/i.test(msg)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(event) {
+          const reason = event.reason;
+          const msg = typeof reason === 'string' ? reason : (reason && reason.message) ? reason.message : String(reason);
+          if (/\[vite\]|websocket/i.test(msg) || (reason && reason.type === 'error')) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vibe Ledger AI</title>
+    <meta name="description" content="자연어로 간편하게 기록하는 스마트 개인 금융 가계부" />
+    <meta property="og:title" content="Vibe Ledger AI" />
+    <meta property="og:description" content="자연어로 간편하게 기록하는 스마트 개인 금융 가계부" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#0B0F17" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="VibeLedger" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-gradient-to-b from-[#0B0F17] via-[#0E1524] to-[#111827] text-slate-100 antialiased overflow-hidden select-none font-sans min-h-screen">
+    <div id="root" class="h-[100dvh] w-full bg-transparent"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

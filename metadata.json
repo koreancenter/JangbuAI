@@ -1,0 +1,9 @@
+{
+  "name": "Vibe Ledger AI",
+  "description": "자연어로 간편하게 기록하는 스마트 개인 금융 가계부",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

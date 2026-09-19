@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+:root {
+  --surface-canvas-light: #F8FAFC;
+  --surface-raised-light: #FFFFFF;
+  --surface-inset-light: #F1F5F9;
+  --surface-subtle-border-light: #E2E8F0;
+  
+  --surface-canvas-dark: #0B0F17;
+  --surface-raised-dark: rgba(255, 255, 255, 0.04);
+  --surface-inset-dark: rgba(0, 0, 0, 0.25);
+  --surface-subtle-border-dark: rgba(255, 255, 255, 0.08);
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+/* Refined subtle scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.4);
+}
