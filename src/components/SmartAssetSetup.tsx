@@ -52,6 +52,7 @@ export const SmartAssetSetup: React.FC<SmartAssetSetupProps> = ({
   const [manualName, setManualName] = useState('');
   const [manualType, setManualType] = useState<AssetType>('CARD');
   const [manualBillingDay, setManualBillingDay] = useState('');
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
 
   // Load assets and discover payment methods from transactions
   useEffect(() => {
@@ -246,7 +247,11 @@ export const SmartAssetSetup: React.FC<SmartAssetSetupProps> = ({
   };
 
   const handleResetDefaults = () => {
-    if (!window.confirm('기본 자산 목록으로 복원하시겠습니까?')) return;
+    setShowResetConfirmModal(true);
+  };
+
+  const handleConfirmReset = () => {
+    setShowResetConfirmModal(false);
     updateAssetsState(DEFAULT_USER_ASSETS);
     setBanner({
       type: 'success',
@@ -705,6 +710,49 @@ export const SmartAssetSetup: React.FC<SmartAssetSetupProps> = ({
                 })}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Resetting Assets (Iframe & cross-origin safe) */}
+      {showResetConfirmModal && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+          onClick={() => setShowResetConfirmModal(false)}
+        >
+          <div 
+            className={`w-full max-w-xs rounded-2xl border p-4 shadow-2xl space-y-3 animate-in zoom-in-95 duration-150 ${
+              isLight ? 'bg-white border-slate-200 text-slate-900' : 'bg-slate-900 border-white/10 text-white'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2">
+              <div className={`p-1.5 rounded-xl ${isLight ? 'bg-amber-100 text-amber-600' : 'bg-amber-500/20 text-amber-400'}`}>
+                <RotateCcw size={16} />
+              </div>
+              <h4 className="text-xs font-bold">기본 자산 목록 복원</h4>
+            </div>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              기본 자산 목록으로 복원하시겠습니까? 현재 등록된 커스텀 결제수단 및 카드 설정이 초기 권장값으로 재설정됩니다.
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowResetConfirmModal(false)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
+                  isLight ? 'border-slate-200 text-slate-600 hover:bg-slate-50' : 'border-white/10 text-slate-400 hover:bg-white/5'
+                }`}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReset}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-all active:scale-95"
+              >
+                복원하기
+              </button>
+            </div>
           </div>
         </div>
       )}

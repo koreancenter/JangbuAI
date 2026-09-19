@@ -115,6 +115,7 @@ export const VaultOverviewSection: React.FC<VaultOverviewSectionProps> = ({
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [showScanModal, setShowScanModal] = useState(false);
   const [editingBalanceAccount, setEditingBalanceAccount] = useState<AssetAccount | null>(null);
+  const [deletingAccount, setDeletingAccount] = useState<{ id: string; name: string } | null>(null);
   const [newBalanceInput, setNewBalanceInput] = useState<string>('');
 
   // AI Screenshot OCR State
@@ -281,14 +282,20 @@ export const VaultOverviewSection: React.FC<VaultOverviewSectionProps> = ({
   };
 
   // Handle Delete Account
-  const handleDeleteAccount = async (id: string, name: string) => {
-    if (!confirm(`'${name}' 자산 계좌를 삭제하시겠습니까?`)) return;
+  const handleDeleteAccount = (id: string, name: string) => {
+    setDeletingAccount({ id, name });
+  };
+
+  const handleConfirmDeleteAccount = async () => {
+    if (!deletingAccount) return;
     try {
-      await deleteAssetAccount(id);
+      await deleteAssetAccount(deletingAccount.id);
       await loadAccounts();
       showToast('계좌가 삭제되었습니다.');
     } catch (e) {
       showToast('삭제 실패', 'error');
+    } finally {
+      setDeletingAccount(null);
     }
   };
 
@@ -1388,6 +1395,49 @@ export const VaultOverviewSection: React.FC<VaultOverviewSectionProps> = ({
                 </div>
               </form>
             </motion.div>
+          </div>
+        )}
+
+        {/* Delete Account Confirmation Modal (Iframe & Cross-Origin Safe) */}
+        {deletingAccount && (
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+            onClick={() => setDeletingAccount(null)}
+          >
+            <div 
+              className={`w-full max-w-xs rounded-2xl border p-4 shadow-2xl space-y-3 animate-in zoom-in-95 duration-150 ${
+                isLight ? 'bg-white border-slate-200 text-slate-900' : 'bg-slate-900 border-white/10 text-white'
+              }`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-2">
+                <div className={`p-1.5 rounded-xl ${isLight ? 'bg-rose-100 text-rose-600' : 'bg-rose-500/20 text-rose-400'}`}>
+                  <Trash2 size={16} />
+                </div>
+                <h4 className="text-xs font-bold">자산 계좌 삭제</h4>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                <span className="font-semibold text-white">'{deletingAccount.name}'</span> 자산 계좌를 삭제하시겠습니까? 계좌 잔고 및 연결 데이터가 목록에서 제외됩니다.
+              </p>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setDeletingAccount(null)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
+                    isLight ? 'border-slate-200 text-slate-600 hover:bg-slate-50' : 'border-white/10 text-slate-400 hover:bg-white/5'
+                  }`}
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteAccount}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-500 hover:bg-rose-400 text-white transition-all active:scale-95 shadow-sm shadow-rose-500/20"
+                >
+                  삭제하기
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </AnimatePresence>

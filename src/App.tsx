@@ -33,6 +33,7 @@ import {
   Tag,
   Camera,
   Globe,
+  Lock,
   X
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
@@ -63,6 +64,8 @@ import { SubscriptionManagerSection } from './components/SubscriptionManagerSect
 import { PredictiveCashflowSection } from './components/PredictiveCashflowSection';
 import { PWAInstallButton, PWAInstallBanner } from './components/PWAInstallButton';
 import { VaultOverviewSection } from './components/VaultOverviewSection';
+import { VaultLockScreen } from './components/VaultLockScreen';
+import { initAutoLockWatcher, lockVault } from './vaultSecurity';
 
 /**
  * Online Connectivity Hook
@@ -221,6 +224,14 @@ export function App() {
       setMainMode(userPrefs.defaultLaunchScreen);
     }
   }, [userPrefs.defaultLaunchScreen]);
+
+  // Zero-Knowledge Vault Auto-Lock Watcher
+  useEffect(() => {
+    const cleanupWatcher = initAutoLockWatcher();
+    return () => {
+      cleanupWatcher();
+    };
+  }, []);
 
   // Modal Visibility States
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -555,6 +566,8 @@ export function App() {
     <div className={`h-[100dvh] w-full max-w-md md:max-w-3xl lg:max-w-4xl mx-auto flex flex-col font-sans antialiased relative overflow-hidden shadow-2xl transition-colors duration-200 ${
       isLight ? 'bg-[#F8FAFC] text-slate-900 shadow-slate-300/40' : 'bg-gradient-to-b from-[#0B0F17] via-[#0D1424] to-[#111827] text-slate-100'
     }`}>
+      {/* Zero-Knowledge Vault Lock Screen Overlay */}
+      <VaultLockScreen onUnlocked={loadTransactions} />
       
       {/* Sleek ambient background lighting */}
       {!isLight && (
@@ -624,6 +637,22 @@ export function App() {
             }`}
           >
             {isStealth ? <EyeOff size={15} /> : <Eye size={15} />}
+          </button>
+
+          {/* Quick Vault Lock Button */}
+          <button
+            id="quick-vault-lock-btn"
+            type="button"
+            onClick={() => lockVault()}
+            title="금고 즉시 잠금 (Lock Vault)"
+            className={`w-8 h-8 flex items-center justify-center rounded-xl transition-all active:scale-95 ${
+              isLight
+                ? 'bg-slate-100 text-slate-600 hover:text-emerald-700 hover:bg-slate-200'
+                : 'bg-white/[0.06] text-[#94A3B8] hover:text-emerald-400 hover:bg-white/10'
+            }`}
+            aria-label="금고 즉시 잠금"
+          >
+            <Lock size={15} />
           </button>
 
           {/* Settings Gear */}

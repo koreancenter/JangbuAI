@@ -54,6 +54,15 @@ import { SmartAssetSetup } from './SmartAssetSetup';
 import { CHART_PALETTES } from '../themePalettes';
 import { encryptBackupData, decryptBackupData, mergeTransactionsDeduplicated } from '../cryptoBackup';
 import { loadSavedSubscriptions, saveSubscriptions } from '../autonomousFinance';
+import {
+  hasVaultPin,
+  setVaultPin,
+  removeVaultPin,
+  getAutoLockConfig,
+  saveAutoLockConfig,
+  lockVault,
+  VaultLockConfig
+} from '../vaultSecurity';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -220,6 +229,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   const [isClearingData, setIsClearingData] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Tab 3: Vault Security & At-Rest Encryption state
+  const [isPinSet, setIsPinSet] = useState<boolean>(false);
+  const [autoLockConfigState, setAutoLockConfigState] = useState<VaultLockConfig>({
+    enabled: true,
+    timeoutMinutes: 15,
+    lockOnVisibilityHidden: true,
+  });
+  const [showPinModal, setShowPinModal] = useState<boolean>(false);
+  const [pinModalMode, setPinModalMode] = useState<'set' | 'remove'>('set');
+  const [pinInput, setPinInput] = useState('');
+  const [pinConfirmInput, setPinConfirmInput] = useState('');
+  const [currentPinInput, setCurrentPinInput] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
+
   // Phase 4: AES-GCM-256 Encrypted Backup & Smart Deduplicated Merge
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportPassphrase, setExportPassphrase] = useState('');
@@ -267,11 +290,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       const lastExp = localStorage.getItem('vibe_last_export_date');
       setLastExportedDate(lastExp || '없음');
 
+      // Load Vault Security & PIN state
+      setIsPinSet(hasVaultPin());
+      setAutoLockConfigState(getAutoLockConfig());
+
       setShowDeleteModal(false);
       setDeleteConfirmationText('');
       setStatusMessage(null);
     }
   }, [isOpen]);
+
+  const handlePinSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPinError(null);
+    try {
+      if (pinModalMode === 'set') {
+        if (pinInput.length < 4) {
+          setPinError('PIN 번호는 최소 4자리 이상이어야 합니다.');
+          return;
+        }
+        if (pinInput !== pinConfirmInput) {
+          setPinError('PIN 번호 확인이 일치하지 않습니다.');
+          return;
+        }
+        await setVaultPin(pinInput);
+        setIsPinSet(true);
+        setShowPinModal(false);
+        setPinInput('');
+        setPinConfirmInput('');
+        setStatusMessage({ type: 'success', text: '금고 PIN 보안 설정이 완료되었습니다.' });
+      } else if (pinModalMode === 'remove') {
+        const removed = await removeVaultPin(currentPinInput);
+        if (!removed) {
+          setPinError('현재 PIN 번호가 올바르지 않습니다.');
+          return;
+        }
+        setIsPinSet(false);
+        setShowPinModal(false);
+        setCurrentPinInput('');
+        setStatusMessage({ type: 'success', text: '금고 PIN 보호가 해제되었습니다. (기기 마스터 키로 암호화 유지)' });
+      }
+    } catch (err: any) {
+      setPinError(err.message || 'PIN 처리 중 오류가 발생했습니다.');
+    }
+  };
 
   const handleThemeChange = (newTheme: ThemeMode) => {
     setTheme(newTheme);
@@ -1301,6 +1363,137 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           {/* TAB 3: DATA & PRIVACY (LOCAL-FIRST) */}
           {activeTab === 'privacy' && (
             <div className="space-y-4 animate-in fade-in duration-150">
+              {/* SECTION: ZERO-KNOWLEDGE VAULT SECURITY & AT-REST ENCRYPTION */}
+              <div className={`p-3.5 rounded-2xl border space-y-3.5 ${
+                isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900/60 border-white/10'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`p-1.5 rounded-lg ${isLight ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-500/15 text-emerald-400'}`}>
+                      <ShieldCheck size={16} />
+                    </div>
+                    <div>
+                      <h4 className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                        금고 보안 및 저장소 암호화 (At-Rest Protection)
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Web Crypto AES-GCM-256 비추출 마스터 키로 금융 자산 데이터 실시간 보호
+                      </p>
+                    </div>
+                  </div>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    암호화 가동 중
+                  </span>
+                </div>
+
+                {/* PIN Protection Setting */}
+                <div className="flex items-center justify-between pt-1 border-t border-white/5">
+                  <div>
+                    <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                      금고 보안 PIN 번호
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      {isPinSet ? 'Zero-Knowledge PIN 암호화 잠금 설정됨' : '미설정 (자동 잠금 시 기기 원터치 해제)'}
+                    </span>
+                  </div>
+
+                  {isPinSet ? (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPinModalMode('set');
+                          setPinInput('');
+                          setPinConfirmInput('');
+                          setPinError(null);
+                          setShowPinModal(true);
+                        }}
+                        className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-colors ${
+                          isLight ? 'border-slate-300 hover:bg-slate-100 text-slate-700' : 'border-white/10 hover:bg-white/5 text-slate-300'
+                        }`}
+                      >
+                        PIN 변경
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPinModalMode('remove');
+                          setCurrentPinInput('');
+                          setPinError(null);
+                          setShowPinModal(true);
+                        }}
+                        className="text-xs px-2.5 py-1 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 font-medium transition-colors"
+                      >
+                        PIN 해제
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPinModalMode('set');
+                        setPinInput('');
+                        setPinConfirmInput('');
+                        setPinError(null);
+                        setShowPinModal(true);
+                      }}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 transition-all active:scale-95 shadow-sm"
+                    >
+                      PIN 설정하기
+                    </button>
+                  )}
+                </div>
+
+                {/* Auto-Lock Inactivity Timeout */}
+                <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                  <div>
+                    <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                      자동 금고 잠금 (비활성 타이머)
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      일정 시간 미사용 또는 브라우저 탭 전환 시 메모리 캐시 삭제 및 즉시 잠금
+                    </span>
+                  </div>
+                  <div className="w-28">
+                    <CustomDarkSelect
+                      value={String(autoLockConfigState.timeoutMinutes)}
+                      options={[
+                        { value: '1', label: '1분' },
+                        { value: '5', label: '5분' },
+                        { value: '15', label: '15분 (권장)' },
+                        { value: '30', label: '30분' },
+                        { value: '60', label: '1시간' },
+                        { value: '0', label: '비활성화' },
+                      ]}
+                      onChange={(val) => {
+                        const mins = parseInt(val, 10);
+                        const updated = { ...autoLockConfigState, timeoutMinutes: mins, enabled: mins > 0 };
+                        setAutoLockConfigState(updated);
+                        saveAutoLockConfig(updated);
+                      }}
+                      theme={isLight ? 'light' : 'dark'}
+                      size="sm"
+                    />
+                  </div>
+                </div>
+
+                {/* Lock Vault Now Button */}
+                <div className="pt-2 border-t border-white/5 flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      lockVault();
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-xs font-semibold transition-all active:scale-95"
+                  >
+                    <Lock size={13} />
+                    <span>지금 금고 잠그기</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Backup & Restore with Last Exported status */}
               <div className="pt-1 space-y-2.5">
                 <div className="flex items-center justify-between">
@@ -1706,6 +1899,115 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 {isClearingData ? <Loader2 size={14} className="animate-spin" /> : '완전 삭제'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Vault PIN Setup / Remove Modal */}
+      {showPinModal && (
+        <div 
+          className="fixed inset-0 z-60 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150"
+          onClick={() => setShowPinModal(false)}
+        >
+          <div 
+            className={`w-full max-w-xs border rounded-3xl p-5 space-y-4 shadow-2xl animate-in zoom-in-95 duration-150 ${
+              isLight ? 'bg-white border-slate-200 text-slate-900' : 'bg-[#0E1526] border-white/10 text-white'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2">
+              <div className={`p-2 rounded-xl ${isLight ? 'bg-emerald-100 text-emerald-700' : 'bg-[#00F5A0]/15 text-[#00F5A0]'}`}>
+                <KeyRound size={18} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold">
+                  {pinModalMode === 'set' ? '금고 보안 PIN 설정' : '금고 보안 PIN 해제'}
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  {pinModalMode === 'set' ? '4자리 이상의 숫자 또는 비밀번호' : '현재 사용 중인 PIN 번호 확인'}
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handlePinSubmit} className="space-y-3">
+              {pinModalMode === 'set' ? (
+                <>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-400 block">
+                      새 PIN 번호 입력
+                    </label>
+                    <input
+                      type="password"
+                      maxLength={12}
+                      value={pinInput}
+                      onChange={(e) => setPinInput(e.target.value)}
+                      placeholder="새 PIN 번호 입력"
+                      className={`w-full px-3 py-2 rounded-xl text-xs border outline-none font-mono tracking-widest text-center ${
+                        isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-slate-900 border-white/10 text-white'
+                      }`}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-400 block">
+                      PIN 번호 재입력 확인
+                    </label>
+                    <input
+                      type="password"
+                      maxLength={12}
+                      value={pinConfirmInput}
+                      onChange={(e) => setPinConfirmInput(e.target.value)}
+                      placeholder="새 PIN 번호 다시 입력"
+                      className={`w-full px-3 py-2 rounded-xl text-xs border outline-none font-mono tracking-widest text-center ${
+                        isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-slate-900 border-white/10 text-white'
+                      }`}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-400 block">
+                    현재 PIN 번호 입력
+                  </label>
+                  <input
+                    type="password"
+                    maxLength={12}
+                    value={currentPinInput}
+                    onChange={(e) => setCurrentPinInput(e.target.value)}
+                    placeholder="현재 PIN 번호 입력"
+                    className={`w-full px-3 py-2 rounded-xl text-xs border outline-none font-mono tracking-widest text-center ${
+                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-slate-900 border-white/10 text-white'
+                    }`}
+                    autoFocus
+                  />
+                </div>
+              )}
+
+              {pinError && (
+                <div className="text-[11px] text-rose-400 flex items-center gap-1">
+                  <AlertTriangle size={12} />
+                  <span>{pinError}</span>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPinModal(false)}
+                  className={`flex-1 py-2 rounded-xl border text-xs font-semibold ${
+                    isLight ? 'border-slate-200 text-slate-600 hover:bg-slate-100' : 'border-white/10 text-slate-400 hover:bg-white/5'
+                  }`}
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 rounded-xl bg-gradient-to-r from-[#00F5A0] to-[#00D9F5] text-slate-950 text-xs font-bold shadow-md shadow-[#00F5A0]/20 active:scale-95"
+                >
+                  {pinModalMode === 'set' ? 'PIN 저장' : 'PIN 해제'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

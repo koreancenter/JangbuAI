@@ -1,5 +1,18 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
 import { Transaction, AssetAccount, DebtItem } from './types';
+import {
+  encryptTransaction,
+  decryptTransaction,
+  encryptAssetAccount,
+  decryptAssetAccount,
+  encryptDebtItem,
+  decryptDebtItem
+} from './vaultSecurity';
+import {
+  sanitizeTransactionInput,
+  sanitizeAssetAccountInput,
+  sanitizeDebtItemInput
+} from './utils';
 
 export const INITIAL_DEBT_ITEMS: DebtItem[] = [
   {
@@ -172,13 +185,18 @@ export function getDB() {
 
 export async function addTransaction(transaction: Transaction) {
   const db = await getDB();
-  await db.add('transactions', transaction);
+  const sanitized = sanitizeTransactionInput(transaction) as Transaction;
+  const encrypted = await encryptTransaction(sanitized);
+  await db.add('transactions', encrypted);
 }
 
 export async function addTransactions(transactions: Transaction[]) {
   const db = await getDB();
+  const encryptedList = await Promise.all(
+    transactions.map(t => encryptTransaction(sanitizeTransactionInput(t) as Transaction))
+  );
   const tx = db.transaction('transactions', 'readwrite');
-  for (const t of transactions) {
+  for (const t of encryptedList) {
     tx.store.put(t);
   }
   await tx.done;
@@ -186,9 +204,12 @@ export async function addTransactions(transactions: Transaction[]) {
 
 export async function replaceAllTransactions(transactions: Transaction[]) {
   const db = await getDB();
+  const encryptedList = await Promise.all(
+    transactions.map(t => encryptTransaction(sanitizeTransactionInput(t) as Transaction))
+  );
   const tx = db.transaction('transactions', 'readwrite');
   await tx.store.clear();
-  for (const t of transactions) {
+  for (const t of encryptedList) {
     tx.store.put(t);
   }
   await tx.done;
@@ -197,7 +218,8 @@ export async function replaceAllTransactions(transactions: Transaction[]) {
 export async function getAllTransactions(): Promise<Transaction[]> {
   const db = await getDB();
   const txs = await db.getAllFromIndex('transactions', 'by-date');
-  return txs.reverse(); // newest first
+  const decrypted = await Promise.all(txs.map(decryptTransaction));
+  return decrypted.reverse(); // newest first
 }
 
 export async function deleteTransaction(id: string) {
@@ -207,7 +229,9 @@ export async function deleteTransaction(id: string) {
 
 export async function updateTransaction(transaction: Transaction) {
   const db = await getDB();
-  await db.put('transactions', transaction);
+  const sanitized = sanitizeTransactionInput(transaction) as Transaction;
+  const encrypted = await encryptTransaction(sanitized);
+  await db.put('transactions', encrypted);
 }
 
 export async function clearAllTransactions() {
@@ -222,7 +246,9 @@ export async function clearAllTransactions() {
 export async function getTransactionsSince(sinceIsoDate: string): Promise<Transaction[]> {
   const db = await getDB();
   const all = await db.getAllFromIndex('transactions', 'by-date');
-  return all.filter(t => t.date >= sinceIsoDate).reverse();
+  const filtered = all.filter(t => t.date >= sinceIsoDate);
+  const decrypted = await Promise.all(filtered.map(decryptTransaction));
+  return decrypted.reverse();
 }
 
 /**
@@ -230,12 +256,14 @@ export async function getTransactionsSince(sinceIsoDate: string): Promise<Transa
  */
 export async function getTransactionsByCategory(category: string): Promise<Transaction[]> {
   const db = await getDB();
-  return db.getAllFromIndex('transactions', 'by-category', category);
+  const txs = await db.getAllFromIndex('transactions', 'by-category', category);
+  return Promise.all(txs.map(decryptTransaction));
 }
 
 export async function getTransactionsByType(type: 'INCOME' | 'EXPENSE' | 'TRANSFER' | 'SETTLEMENT'): Promise<Transaction[]> {
   const db = await getDB();
-  return db.getAllFromIndex('transactions', 'by-type', type);
+  const txs = await db.getAllFromIndex('transactions', 'by-type', type);
+  return Promise.all(txs.map(decryptTransaction));
 }
 
 /**
@@ -245,20 +273,27 @@ export async function getAllAssetAccounts(): Promise<AssetAccount[]> {
   const db = await getDB();
   const accounts = await db.getAll('assetAccounts');
   if (!accounts || accounts.length === 0) {
-    // Seed initial demo/default accounts so new users immediately experience the vault
+    // Seed initial demo/default accounts with at-rest encryption
+    const encryptedInitial = await Promise.all(
+      INITIAL_ASSET_ACCOUNTS.map(item => 
+        encryptAssetAccount(sanitizeAssetAccountInput(item) as AssetAccount)
+      )
+    );
     const tx = db.transaction('assetAccounts', 'readwrite');
-    for (const item of INITIAL_ASSET_ACCOUNTS) {
+    for (const item of encryptedInitial) {
       tx.store.put(item);
     }
     await tx.done;
     return INITIAL_ASSET_ACCOUNTS;
   }
-  return accounts;
+  return Promise.all(accounts.map(decryptAssetAccount));
 }
 
 export async function saveAssetAccount(account: AssetAccount): Promise<void> {
   const db = await getDB();
-  await db.put('assetAccounts', account);
+  const sanitized = sanitizeAssetAccountInput(account) as AssetAccount;
+  const encrypted = await encryptAssetAccount(sanitized);
+  await db.put('assetAccounts', encrypted);
 }
 
 export async function deleteAssetAccount(id: string): Promise<void> {
@@ -274,13 +309,16 @@ export async function updateAssetAccountBalance(id: string, newBalance: number):
   account.currentBalance = newBalance;
   account.lastUpdated = new Date().toISOString();
   await db.put('assetAccounts', account);
-  return account;
+  return decryptAssetAccount(account);
 }
 
 export async function bulkSaveAssetAccounts(accounts: AssetAccount[]): Promise<void> {
   const db = await getDB();
+  const encryptedList = await Promise.all(
+    accounts.map(acc => encryptAssetAccount(sanitizeAssetAccountInput(acc) as AssetAccount))
+  );
   const tx = db.transaction('assetAccounts', 'readwrite');
-  for (const acc of accounts) {
+  for (const acc of encryptedList) {
     tx.store.put(acc);
   }
   await tx.done;
@@ -305,11 +343,14 @@ export async function executeAccountTransfer(
   }
 
   const db = await getDB();
-  const source = await db.get('assetAccounts', sourceAccountId);
-  const target = await db.get('assetAccounts', targetAccountId);
+  const rawSource = await db.get('assetAccounts', sourceAccountId);
+  const rawTarget = await db.get('assetAccounts', targetAccountId);
 
-  if (!source) throw new Error('출금 계좌를 찾을 수 없습니다.');
-  if (!target) throw new Error('입금 계좌를 찾을 수 없습니다.');
+  if (!rawSource) throw new Error('출금 계좌를 찾을 수 없습니다.');
+  if (!rawTarget) throw new Error('입금 계좌를 찾을 수 없습니다.');
+
+  const source = await decryptAssetAccount(rawSource);
+  const target = await decryptAssetAccount(rawTarget);
 
   // Adjust balances
   source.currentBalance = Math.max(0, source.currentBalance - amount);
@@ -334,11 +375,15 @@ export async function executeAccountTransfer(
     isInternalTransfer: true,
   };
 
+  const encryptedTx = await encryptTransaction(sanitizeTransactionInput(transferTx) as Transaction);
+  const encryptedSource = await encryptAssetAccount(source);
+  const encryptedTarget = await encryptAssetAccount(target);
+
   // Perform atomic multi-store write
   const tx = db.transaction(['assetAccounts', 'transactions'], 'readwrite');
-  tx.objectStore('assetAccounts').put(source);
-  tx.objectStore('assetAccounts').put(target);
-  tx.objectStore('transactions').put(transferTx);
+  tx.objectStore('assetAccounts').put(encryptedSource);
+  tx.objectStore('assetAccounts').put(encryptedTarget);
+  tx.objectStore('transactions').put(encryptedTx);
   await tx.done;
 
   return { transaction: transferTx, sourceAccount: source, targetAccount: target };
@@ -351,20 +396,27 @@ export async function getAllDebts(): Promise<DebtItem[]> {
   const db = await getDB();
   const debts = await db.getAll('debts');
   if (!debts || debts.length === 0) {
-    // Seed initial demo loans & receivables so user immediately tests smart splits
+    // Seed initial demo loans & receivables with at-rest encryption
+    const encryptedInitial = await Promise.all(
+      INITIAL_DEBT_ITEMS.map(item =>
+        encryptDebtItem(sanitizeDebtItemInput(item) as DebtItem)
+      )
+    );
     const tx = db.transaction('debts', 'readwrite');
-    for (const item of INITIAL_DEBT_ITEMS) {
+    for (const item of encryptedInitial) {
       tx.store.put(item);
     }
     await tx.done;
     return INITIAL_DEBT_ITEMS;
   }
-  return debts;
+  return Promise.all(debts.map(decryptDebtItem));
 }
 
 export async function saveDebt(debt: DebtItem): Promise<void> {
   const db = await getDB();
-  await db.put('debts', debt);
+  const sanitized = sanitizeDebtItemInput(debt) as DebtItem;
+  const encrypted = await encryptDebtItem(sanitized);
+  await db.put('debts', encrypted);
 }
 
 export async function deleteDebt(id: string): Promise<void> {
@@ -383,7 +435,7 @@ export async function updateDebtRemainingPrincipal(id: string, newRemaining: num
   }
   debt.lastUpdated = new Date().toISOString();
   await db.put('debts', debt);
-  return debt;
+  return decryptDebtItem(debt);
 }
 
 /**
@@ -399,8 +451,10 @@ export async function executeLoanRepaymentSplit(
   paymentMethod?: string
 ): Promise<{ interestTransaction?: Transaction; principalTransaction: Transaction; updatedDebt: DebtItem }> {
   const db = await getDB();
-  const debt = await db.get('debts', debtId);
-  if (!debt) throw new Error('대출/부채 항목을 찾을 수 없습니다.');
+  const rawDebt = await db.get('debts', debtId);
+  if (!rawDebt) throw new Error('대출/부채 항목을 찾을 수 없습니다.');
+
+  const debt = await decryptDebtItem(rawDebt);
 
   // 1. Calculate new remaining balance
   debt.remainingPrincipal = Math.max(0, debt.remainingPrincipal - principalReduction);
@@ -445,13 +499,17 @@ export async function executeLoanRepaymentSplit(
     };
   }
 
+  // Encrypt records before writing
+  const encryptedDebt = await encryptDebtItem(debt);
+  const encryptedPrincipalTx = await encryptTransaction(sanitizeTransactionInput(principalTx) as Transaction);
+  const encryptedInterestTx = interestTx ? await encryptTransaction(sanitizeTransactionInput(interestTx) as Transaction) : undefined;
+
   // 4. Perform atomic multi-store write
-  const stores = interestTx ? ['debts', 'transactions'] as const : ['debts', 'transactions'] as const;
-  const tx = db.transaction(stores, 'readwrite');
-  tx.objectStore('debts').put(debt);
-  tx.objectStore('transactions').put(principalTx);
-  if (interestTx) {
-    tx.objectStore('transactions').put(interestTx);
+  const tx = db.transaction(['debts', 'transactions'], 'readwrite');
+  tx.objectStore('debts').put(encryptedDebt);
+  tx.objectStore('transactions').put(encryptedPrincipalTx);
+  if (encryptedInterestTx) {
+    tx.objectStore('transactions').put(encryptedInterestTx);
   }
   await tx.done;
 
@@ -474,8 +532,10 @@ export async function executeReceivableRecovery(
   paymentMethod?: string
 ): Promise<{ settlementTransaction: Transaction; updatedDebt: DebtItem }> {
   const db = await getDB();
-  const debt = await db.get('debts', debtId);
-  if (!debt) throw new Error('미수금/빌려준 돈 항목을 찾을 수 없습니다.');
+  const rawDebt = await db.get('debts', debtId);
+  if (!rawDebt) throw new Error('미수금/빌려준 돈 항목을 찾을 수 없습니다.');
+
+  const debt = await decryptDebtItem(rawDebt);
 
   debt.remainingPrincipal = Math.max(0, debt.remainingPrincipal - recoveryAmount);
   if (debt.remainingPrincipal === 0) {
@@ -498,9 +558,12 @@ export async function executeReceivableRecovery(
     isInternalTransfer: true, // Do not inflate new income
   };
 
+  const encryptedDebt = await encryptDebtItem(debt);
+  const encryptedSettlementTx = await encryptTransaction(sanitizeTransactionInput(settlementTx) as Transaction);
+
   const tx = db.transaction(['debts', 'transactions'], 'readwrite');
-  tx.objectStore('debts').put(debt);
-  tx.objectStore('transactions').put(settlementTx);
+  tx.objectStore('debts').put(encryptedDebt);
+  tx.objectStore('transactions').put(encryptedSettlementTx);
   await tx.done;
 
   return {
@@ -508,6 +571,7 @@ export async function executeReceivableRecovery(
     updatedDebt: debt
   };
 }
+
 
 
 

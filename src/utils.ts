@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { Asset, AssetType, AssetCategoryType, LaunchScreenMode, ChartPaletteType, SupportedCurrency, FxRates } from './types';
+import { Asset, AssetType, AssetCategoryType, LaunchScreenMode, ChartPaletteType, SupportedCurrency, FxRates, Transaction, AssetAccount, DebtItem } from './types';
 import { getSecureGeminiApiKey, setSecureGeminiApiKey, sanitizeApiKey } from './geminiKeyManager';
 
 export function cn(...inputs: ClassValue[]) {
@@ -326,4 +326,69 @@ export function getCategoryBudgets(): Record<string, number> {
 export function saveCategoryBudgets(budgets: Record<string, number>): void {
   localStorage.setItem('vibe_category_budgets', JSON.stringify(budgets));
 }
+
+/**
+ * Strict Input Sanitization & XSS Mitigation
+ * Strips HTML tags, script payloads, dangerous URI protocols, and ASCII/Unicode control characters.
+ */
+export function sanitizeTextInput(input: unknown, maxLength: number = 500): string {
+  if (input === null || input === undefined) return '';
+  let str = String(input);
+
+  // 1. Unicode Normalization (NFKC) to resolve homoglyphs and zero-width confusables
+  try {
+    str = str.normalize('NFKC');
+  } catch {}
+
+  // 2. Strip control characters (\u0000-\u0008, \u000B, \u000C, \u000E-\u001F, \u007F-\u009F)
+  // Preserve newline (\n) and tab (\t)
+  str = str.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
+
+  // 3. Strip HTML/XML tags and potential markup injections
+  str = str.replace(/<[^>]*>?/gm, '');
+
+  // 4. Strip dangerous pseudo-protocols and script execution strings
+  str = str.replace(/javascript:/gi, '')
+           .replace(/data:text\/html/gi, '')
+           .replace(/vbscript:/gi, '')
+           .replace(/on\w+\s*=/gi, '');
+
+  // 5. Trim and enforce length bound
+  str = str.trim();
+  if (maxLength > 0 && str.length > maxLength) {
+    str = str.slice(0, maxLength);
+  }
+
+  return str;
+}
+
+export function sanitizeTransactionInput<T extends Partial<Transaction>>(tx: T): T {
+  return {
+    ...tx,
+    description: tx.description !== undefined ? sanitizeTextInput(tx.description, 300) : tx.description,
+    category: tx.category !== undefined ? sanitizeTextInput(tx.category, 50) : tx.category,
+    subCategory: tx.subCategory !== undefined ? sanitizeTextInput(tx.subCategory, 50) : tx.subCategory,
+    paymentMethod: tx.paymentMethod !== undefined ? sanitizeTextInput(tx.paymentMethod, 100) : tx.paymentMethod
+  };
+}
+
+export function sanitizeAssetAccountInput<T extends Partial<AssetAccount>>(acc: T): T {
+  return {
+    ...acc,
+    accountName: acc.accountName !== undefined ? sanitizeTextInput(acc.accountName, 100) : acc.accountName,
+    institution: acc.institution !== undefined ? sanitizeTextInput(acc.institution, 100) : acc.institution,
+    accountNumberMasked: acc.accountNumberMasked !== undefined ? sanitizeTextInput(acc.accountNumberMasked, 100) : acc.accountNumberMasked,
+    note: acc.note !== undefined ? sanitizeTextInput(acc.note, 500) : acc.note
+  };
+}
+
+export function sanitizeDebtItemInput<T extends Partial<DebtItem>>(debt: T): T {
+  return {
+    ...debt,
+    name: debt.name !== undefined ? sanitizeTextInput(debt.name, 100) : debt.name,
+    counterpartyOrBank: debt.counterpartyOrBank !== undefined ? sanitizeTextInput(debt.counterpartyOrBank, 100) : debt.counterpartyOrBank,
+    notes: debt.notes !== undefined ? sanitizeTextInput(debt.notes, 500) : debt.notes
+  };
+}
+
 
