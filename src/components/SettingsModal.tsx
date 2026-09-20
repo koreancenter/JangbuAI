@@ -69,6 +69,7 @@ import {
   lockVault,
   VaultLockConfig
 } from '../vaultSecurity';
+import { evictAllServiceWorkerCaches } from '../usePWAInstall';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -93,6 +94,7 @@ interface CustomSelectProps {
   className?: string;
   theme?: 'dark' | 'light';
   size?: 'sm' | 'md';
+  showSublabelInTrigger?: boolean;
 }
 
 const CustomDarkSelect: React.FC<CustomSelectProps> = ({ 
@@ -102,7 +104,8 @@ const CustomDarkSelect: React.FC<CustomSelectProps> = ({
   id, 
   className = '', 
   theme = 'dark',
-  size = 'md'
+  size = 'md',
+  showSublabelInTrigger = false
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -142,7 +145,7 @@ const CustomDarkSelect: React.FC<CustomSelectProps> = ({
       >
         <span className="truncate font-medium">
           {selectedOption?.label}
-          {selectedOption?.sublabel && (
+          {showSublabelInTrigger && selectedOption?.sublabel && (
             <span className={`text-[11px] ml-2 font-normal ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
               {selectedOption.sublabel}
             </span>
@@ -202,9 +205,16 @@ const CustomDarkSelect: React.FC<CustomSelectProps> = ({
   );
 };
 
+const VALID_SETTINGS_TABS: ('assets' | 'engine' | 'preferences' | 'privacy')[] = ['assets', 'engine', 'preferences', 'privacy'];
+const resolveSafeTab = (tab: unknown): 'assets' | 'engine' | 'preferences' | 'privacy' => {
+  return typeof tab === 'string' && (VALID_SETTINGS_TABS as string[]).includes(tab)
+    ? (tab as 'assets' | 'engine' | 'preferences' | 'privacy')
+    : 'assets';
+};
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onDataChanged, onDataReset, initialTab }) => {
   // 4-Tab Segmented Control: [ 스마트 자산 | AI 엔진 | 일반 설정 | 데이터 관리 ]
-  const [activeTab, setActiveTab] = useState<'assets' | 'engine' | 'preferences' | 'privacy'>(initialTab || 'assets');
+  const [activeTab, setActiveTab] = useState<'assets' | 'engine' | 'preferences' | 'privacy'>(resolveSafeTab(initialTab));
 
   // Tab 1: AI Engine state
   const [engineType, setEngineType] = useState<'local' | 'byok'>('local');
@@ -270,7 +280,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   useEffect(() => {
     if (isOpen) {
       if (initialTab) {
-        setActiveTab(initialTab);
+        setActiveTab(resolveSafeTab(initialTab));
       }
       // Load current AI Engine config
       const engineCfg = getAIEngineConfig();
@@ -478,7 +488,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       stealthMode,
       theme,
       chartPalette,
-      autoCategorization
+      autoCategorization,
+      defaultLaunchScreen
     };
     saveUserPreferences(userPrefs);
     applyTheme(theme);
@@ -732,6 +743,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       setLastExportedDate('없음');
       setShowDeleteModal(false);
       setDeleteConfirmationText('');
+
+      // Security Hardening Item #5: Evict all CacheStorage buckets upon full database reset
+      await evictAllServiceWorkerCaches().catch(() => false);
 
       setStatusMessage({ type: 'success', text: '모든 데이터와 API 키가 완전히 초기화되었습니다.' });
       if (onDataChanged) onDataChanged();
@@ -1104,22 +1118,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
           {/* TAB 2: GENERAL PREFERENCES (Compact, Elegant, Non-scrolling iOS Grouped Style) */}
           {activeTab === 'preferences' && (
-            <div className="space-y-3.5 animate-in fade-in duration-150">
-              {/* Section 1: Display & Theme */}
+            <div className="space-y-4 animate-in fade-in duration-150">
+              
+              {/* Group 1: 화면 및 테마 (Display & Theme) */}
               <div className="space-y-1.5">
                 <span className={`text-[11px] font-bold px-1 uppercase tracking-wider block ${
                   isLight ? 'text-slate-400' : 'text-slate-500'
                 }`}>
                   화면 및 테마
                 </span>
-                <div className="space-y-1 px-1">
-                  {/* Row 0: Default Launch Screen Segmented Control */}
-                  <div className="py-2 flex items-center justify-between gap-3">
+                
+                <div className={`p-3 rounded-2xl border space-y-3.5 ${
+                  isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-white/[0.02] border-white/5'
+                }`}>
+                  {/* Row 1: 기본 시작 화면 (자산 | 장부) */}
+                  <div className="flex items-center justify-between gap-3">
                     <div>
                       <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
                         기본 시작 화면
                       </span>
-                      <span className={`text-[10px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                      <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
                         앱 실행 시 첫 화면을 지정합니다
                       </span>
                     </div>
@@ -1135,7 +1153,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                           saveUserPreferences({ ...prefs, defaultLaunchScreen: 'vault' });
                           if (onDataChanged) onDataChanged();
                         }}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 active:scale-95 ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 ${
                           defaultLaunchScreen === 'vault'
                             ? isLight
                               ? 'bg-white text-slate-950 shadow-xs font-bold'
@@ -1145,8 +1163,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                               : 'text-slate-400 hover:text-slate-200'
                         }`}
                       >
-                        <ShieldCheck size={12} className="text-blue-400" />
-                        <span>볼트 (Vault)</span>
+                        자산
                       </button>
                       <button
                         type="button"
@@ -1157,7 +1174,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                           saveUserPreferences({ ...prefs, defaultLaunchScreen: 'ledger' });
                           if (onDataChanged) onDataChanged();
                         }}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 active:scale-95 ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 ${
                           defaultLaunchScreen === 'ledger'
                             ? isLight
                               ? 'bg-white text-slate-950 shadow-xs font-bold'
@@ -1167,14 +1184,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                               : 'text-slate-400 hover:text-slate-200'
                         }`}
                       >
-                        <Wallet size={12} className="text-emerald-400" />
-                        <span>가계부 (Ledger)</span>
+                        장부
                       </button>
                     </div>
                   </div>
 
-                  {/* Row 1: Screen Theme (3-way Segmented Control: Dark | Light | System) */}
-                  <div className="py-2 flex items-center justify-between gap-3">
+                  {/* Row 2: 화면 테마 (다크 | 라이트 | 시스템 - 아이콘 삭제) */}
+                  <div className="flex items-center justify-between gap-3 pt-1 border-t border-inherit">
                     <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
                       화면 테마
                     </span>
@@ -1185,7 +1201,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                         type="button"
                         id="theme-dark-btn"
                         onClick={() => handleThemeChange('dark')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 active:scale-95 ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 ${
                           theme === 'dark'
                             ? isLight
                               ? 'bg-white text-slate-950 shadow-xs font-bold'
@@ -1195,14 +1211,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                               : 'text-slate-400 hover:text-slate-200'
                         }`}
                       >
-                        <Moon size={12} />
-                        <span>다크</span>
+                        다크
                       </button>
                       <button
                         type="button"
                         id="theme-light-btn"
                         onClick={() => handleThemeChange('light')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 active:scale-95 ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 ${
                           theme === 'light'
                             ? isLight
                               ? 'bg-white text-slate-950 shadow-xs font-bold'
@@ -1212,14 +1227,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                               : 'text-slate-400 hover:text-slate-200'
                         }`}
                       >
-                        <Sun size={12} />
-                        <span>라이트</span>
+                        라이트
                       </button>
                       <button
                         type="button"
                         id="theme-system-btn"
                         onClick={() => handleThemeChange('system')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 active:scale-95 ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 ${
                           theme === 'system'
                             ? isLight
                               ? 'bg-white text-slate-950 shadow-xs font-bold'
@@ -1229,18 +1243,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                               : 'text-slate-400 hover:text-slate-200'
                         }`}
                       >
-                        <Monitor size={12} />
-                        <span>시스템</span>
+                        시스템
                       </button>
                     </div>
                   </div>
 
-                  {/* Row 2: Chart Color Theme (Horizontal Color Swatch Row) */}
-                  <div className="py-1.5 flex items-center justify-between gap-3">
-                    <span className={`text-xs font-semibold shrink-0 ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                  {/* Row 3: 차트 컬러 (4열 그리드로 전체 표시, 이모지 제거) */}
+                  <div className="pt-1 border-t border-inherit space-y-2">
+                    <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
                       차트 컬러
                     </span>
-                    <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5">
+                    <div className="grid grid-cols-4 gap-1.5">
                       {Object.values(CHART_PALETTES).map((palette) => {
                         const isSelected = chartPalette === palette.id;
                         return (
@@ -1250,27 +1263,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                             id={`chart-palette-btn-${palette.id}`}
                             onClick={() => handleChartPaletteChange(palette.id)}
                             title={`${palette.name} (${palette.subtitle})`}
-                            className={`px-2 py-1 rounded-lg border transition-all flex items-center gap-1.5 active:scale-95 shrink-0 ${
+                            className={`py-2 px-1 rounded-xl border transition-all flex flex-col items-center justify-center gap-1.5 active:scale-95 ${
                               isSelected
                                 ? isLight
-                                  ? 'bg-white border-emerald-500 ring-1 ring-emerald-500/30 shadow-2xs'
-                                  : 'bg-white/10 border-[#00F5A0] ring-1 ring-[#00F5A0]/30 text-white'
+                                  ? 'bg-white border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
+                                  : 'bg-white/10 border-[#00F5A0] ring-2 ring-[#00F5A0]/20 text-white'
                                 : isLight
-                                  ? 'bg-slate-100/80 border-transparent hover:bg-slate-200/70 text-slate-600'
-                                  : 'bg-white/[0.04] border-transparent hover:bg-white/[0.08] text-slate-400 hover:text-slate-200'
+                                  ? 'bg-white/60 border-slate-200 hover:bg-white text-slate-600'
+                                  : 'bg-black/20 border-white/5 hover:bg-white/[0.05] text-slate-400 hover:text-slate-200'
                             }`}
                           >
-                            <span className="text-xs leading-none select-none">{palette.emoji}</span>
                             <div className="flex items-center -space-x-1">
                               {palette.swatches.slice(0, 3).map((color, i) => (
                                 <span
                                   key={i}
-                                  className="w-2.5 h-2.5 rounded-full border border-black/10 dark:border-white/20"
+                                  className="w-2.5 h-2.5 rounded-full border border-black/15 dark:border-white/20 shadow-2xs"
                                   style={{ backgroundColor: color }}
                                 />
                               ))}
                             </div>
-                            <span className={`text-[11px] ${
+                            <span className={`text-[11px] truncate w-full text-center ${
                               isSelected
                                 ? isLight ? 'text-emerald-700 font-bold' : 'text-[#00F5A0] font-bold'
                                 : 'font-medium'
@@ -1285,19 +1297,106 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 </div>
               </div>
 
-              {/* Section 2: Ledger Preferences */}
-              <div className="space-y-1.5 pt-2">
+              {/* Group 2: 표시 및 통화 (Display & Currency) */}
+              <div className="space-y-1.5">
                 <span className={`text-[11px] font-bold px-1 uppercase tracking-wider block ${
                   isLight ? 'text-slate-400' : 'text-slate-500'
                 }`}>
-                  가계부 설정
+                  표시 및 통화
                 </span>
-                <div className="space-y-1 px-1">
-                  {/* Row 1: Budget Start Day (Sleek Number Picker Dropdown) */}
-                  <div className="py-1.5 flex items-center justify-between gap-3">
-                    <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
-                      예산 시작일
-                    </span>
+                <div className={`p-3 rounded-2xl border space-y-3 ${
+                  isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-white/[0.02] border-white/5'
+                }`}>
+                  {/* Row 1: 기본 통화 */}
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                        기본 통화
+                      </span>
+                      <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                        자산 및 장부 기준 통화 단위
+                      </span>
+                    </div>
+                    <div className="w-28">
+                      <CustomDarkSelect
+                        id="currency-select"
+                        value={currencySymbol}
+                        options={currencyOptions}
+                        onChange={(val) => {
+                          setCurrencySymbol(val);
+                          const prefs = getUserPreferences();
+                          saveUserPreferences({ ...prefs, currencySymbol: val });
+                          if (onDataChanged) onDataChanged();
+                        }}
+                        theme={isLight ? 'light' : 'dark'}
+                        size="sm"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 2: 스텔스 모드 (금액 숨김 - 전체 행 클릭 가능) */}
+                  <div
+                    onClick={() => {
+                      const next = !stealthMode;
+                      setStealthMode(next);
+                      const prefs = getUserPreferences();
+                      saveUserPreferences({ ...prefs, stealthMode: next });
+                      if (onDataChanged) onDataChanged();
+                    }}
+                    className="flex items-center justify-between gap-3 pt-2 border-t border-inherit cursor-pointer select-none group"
+                  >
+                    <div>
+                      <span className={`text-xs font-semibold block group-hover:text-emerald-500 transition-colors ${
+                        isLight ? 'text-slate-800' : 'text-slate-200'
+                      }`}>
+                        스텔스 모드 (금액 숨김)
+                      </span>
+                      <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                        공공장소에서 민감한 총액 숨기기
+                      </span>
+                    </div>
+                    <button
+                      id="toggle-stealth-mode"
+                      type="button"
+                      aria-label="스텔스 모드 토글"
+                      className={`w-9 h-5 rounded-full transition-colors relative flex items-center p-0.5 shrink-0 pointer-events-none ${
+                        stealthMode
+                          ? 'bg-emerald-500'
+                          : isLight
+                            ? 'bg-slate-300'
+                            : 'bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`w-4 h-4 rounded-full bg-white shadow-xs transition-transform transform ${
+                          stealthMode ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Group 3: 장부 설정 (Ledger Settings) */}
+              <div className="space-y-1.5">
+                <span className={`text-[11px] font-bold px-1 uppercase tracking-wider block ${
+                  isLight ? 'text-slate-400' : 'text-slate-500'
+                }`}>
+                  장부 설정
+                </span>
+                <div className={`p-3 rounded-2xl border space-y-3 ${
+                  isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-white/[0.02] border-white/5'
+                }`}>
+                  {/* Row 1: 예산 시작일 */}
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                        예산 시작일
+                      </span>
+                      <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                        월간 지출 및 예산 정산 기준일
+                      </span>
+                    </div>
                     <div className="w-24">
                       <CustomDarkSelect
                         id="budget-start-day-select"
@@ -1316,77 +1415,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                     </div>
                   </div>
 
-                  {/* Row 2: Default Currency Symbol Dropdown */}
-                  <div className="py-1.5 flex items-center justify-between gap-3">
-                    <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
-                      기본 통화
-                    </span>
-                    <div className="w-28">
-                      <CustomDarkSelect
-                        id="currency-select"
-                        value={currencySymbol}
-                        options={currencyOptions}
-                        onChange={(val) => {
-                          setCurrencySymbol(val);
-                          const prefs = getUserPreferences();
-                          saveUserPreferences({ ...prefs, currencySymbol: val });
-                          if (onDataChanged) onDataChanged();
-                        }}
-                        theme={isLight ? 'light' : 'dark'}
-                        size="sm"
-                      />
+                  {/* Row 2: 스마트 자동 분류 (전체 행 클릭 가능) */}
+                  <div
+                    onClick={() => {
+                      const next = !autoCategorization;
+                      setAutoCategorization(next);
+                      const prefs = getUserPreferences();
+                      saveUserPreferences({ ...prefs, autoCategorization: next });
+                      if (onDataChanged) onDataChanged();
+                    }}
+                    className="flex items-center justify-between gap-3 pt-2 border-t border-inherit cursor-pointer select-none group"
+                  >
+                    <div>
+                      <span className={`text-xs font-semibold block group-hover:text-emerald-500 transition-colors ${
+                        isLight ? 'text-slate-800' : 'text-slate-200'
+                      }`}>
+                        스마트 자동 분류
+                      </span>
+                      <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                        입력 시 AI가 카테고리를 자동 추론
+                      </span>
                     </div>
-                  </div>
-
-                  {/* Row 3: Stealth Mode Toggle Switch */}
-                  <div className="py-2 flex items-center justify-between gap-3">
-                    <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
-                      스텔스 모드 (금액 숨김)
-                    </span>
-                    <button
-                      id="toggle-stealth-mode"
-                      type="button"
-                      onClick={() => {
-                        const next = !stealthMode;
-                        setStealthMode(next);
-                        const prefs = getUserPreferences();
-                        saveUserPreferences({ ...prefs, stealthMode: next });
-                        if (onDataChanged) onDataChanged();
-                      }}
-                      aria-label="스텔스 모드 토글"
-                      className={`w-9 h-5 rounded-full transition-colors relative flex items-center p-0.5 shrink-0 active:scale-95 ${
-                        stealthMode
-                          ? 'bg-emerald-500'
-                          : isLight
-                            ? 'bg-slate-300'
-                            : 'bg-slate-700'
-                      }`}
-                    >
-                      <span
-                        className={`w-4 h-4 rounded-full bg-white shadow-xs transition-transform transform ${
-                          stealthMode ? 'translate-x-4' : 'translate-x-0'
-                        }`}
-                      />
-                    </button>
-                  </div>
-
-                  {/* Row 4: Smart Auto-Categorization Toggle Switch */}
-                  <div className="py-2 flex items-center justify-between gap-3">
-                    <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
-                      스마트 자동 분류
-                    </span>
                     <button
                       id="toggle-auto-categorization"
                       type="button"
-                      onClick={() => {
-                        const next = !autoCategorization;
-                        setAutoCategorization(next);
-                        const prefs = getUserPreferences();
-                        saveUserPreferences({ ...prefs, autoCategorization: next });
-                        if (onDataChanged) onDataChanged();
-                      }}
                       aria-label="스마트 자동 분류 토글"
-                      className={`w-9 h-5 rounded-full transition-colors relative flex items-center p-0.5 shrink-0 active:scale-95 ${
+                      className={`w-9 h-5 rounded-full transition-colors relative flex items-center p-0.5 shrink-0 pointer-events-none ${
                         autoCategorization
                           ? 'bg-emerald-500'
                           : isLight
@@ -1403,6 +1457,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                   </div>
                 </div>
               </div>
+
             </div>
           )}
 

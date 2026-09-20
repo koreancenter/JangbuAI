@@ -267,8 +267,13 @@ export function App() {
   const handleOpenReceiptModal = useCallback(() => setIsReceiptModalOpen(true), []);
   const handleCloseReceiptModal = useCallback(() => setIsReceiptModalOpen(false), []);
 
-  const handleOpenSettingsModal = useCallback((tab: 'assets' | 'engine' | 'preferences' | 'privacy' = 'assets') => {
-    setSettingsInitialTab(tab);
+  const handleOpenSettingsModal = useCallback((tab?: unknown) => {
+    const validTabs: ('assets' | 'engine' | 'preferences' | 'privacy')[] = ['assets', 'engine', 'preferences', 'privacy'];
+    const resolvedTab: 'assets' | 'engine' | 'preferences' | 'privacy' =
+      typeof tab === 'string' && (validTabs as string[]).includes(tab)
+        ? (tab as 'assets' | 'engine' | 'preferences' | 'privacy')
+        : 'assets';
+    setSettingsInitialTab(resolvedTab);
     setIsSettingsOpen(true);
   }, []);
   const handleCloseSettingsModal = useCallback(() => {
@@ -533,7 +538,7 @@ export function App() {
       }
     } catch (err: unknown) {
       console.error(err);
-      const msg = err instanceof Error ? err.message : '가계부 처리 중 오류가 발생했습니다.';
+      const msg = err instanceof Error ? err.message : '장부 처리 중 오류가 발생했습니다.';
       setError(msg);
     } finally {
       setIsProcessing(false);
@@ -595,7 +600,7 @@ export function App() {
             <span className={`text-xs font-medium truncate ${
               isLight ? 'text-slate-500' : 'text-[#94A3B8]'
             }`}>
-              {mainMode === 'vault' ? '프라이빗 자산 금고 & 포트폴리오' : `${format(now, 'yyyy년 M월')} 일일 가계부`}
+              {mainMode === 'vault' ? '프라이빗 자산 금고 & 포트폴리오' : `${format(now, 'yyyy년 M월')} 일일 장부`}
             </span>
           </div>
         </div>
@@ -659,7 +664,7 @@ export function App() {
           <button
             id="settings-gear-btn"
             type="button"
-            onClick={handleOpenSettingsModal}
+            onClick={() => handleOpenSettingsModal('assets')}
             className={`w-8 h-8 flex items-center justify-center rounded-xl active:scale-95 transition-all ${
               isLight
                 ? 'bg-slate-100 text-slate-600 hover:text-slate-950 hover:bg-slate-200'
@@ -671,54 +676,6 @@ export function App() {
           </button>
         </div>
       </header>
-
-      {/* 1.5. PRIMARY MODE TAB SWITCHER: Vault vs Ledger */}
-      <div className={`flex-none px-4 sm:px-6 py-2 border-b backdrop-blur-md flex items-center justify-between gap-2 z-10 transition-colors ${
-        isLight ? 'bg-white/80 border-slate-200/80' : 'bg-[#0B0F17]/60 border-white/5'
-      }`}>
-        <div className={`flex p-1 rounded-2xl border transition-all ${
-          isLight ? 'bg-slate-100/90 border-slate-200' : 'bg-black/40 border-white/5'
-        }`}>
-          <button
-            id="top-mode-vault-btn"
-            type="button"
-            onClick={() => setMainMode('vault')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 ${
-              mainMode === 'vault'
-                ? isLight
-                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200/60'
-                  : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20'
-                : isLight
-                ? 'text-slate-500 hover:text-slate-900'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <ShieldCheck size={14} className={mainMode === 'vault' ? (isLight ? 'text-blue-600' : 'text-blue-200') : 'text-blue-400'} />
-            <span>볼트 (Vault)</span>
-          </button>
-          <button
-            id="top-mode-ledger-btn"
-            type="button"
-            onClick={() => setMainMode('ledger')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 ${
-              mainMode === 'ledger'
-                ? isLight
-                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200/60'
-                  : 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/20'
-                : isLight
-                ? 'text-slate-500 hover:text-slate-900'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Wallet size={14} className={mainMode === 'ledger' ? (isLight ? 'text-emerald-600' : 'text-emerald-200') : 'text-emerald-400'} />
-            <span>가계부 (Ledger)</span>
-          </button>
-        </div>
-
-        <span className={`text-[11px] font-medium hidden sm:block ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>
-          {mainMode === 'vault' ? '다중 증권사 · 거래소 통합 자산' : '일일 지출 추적 및 스마트 예산'}
-        </span>
-      </div>
 
       {/* 2. SCROLLABLE MIDDLE VIEWPORT */}
       <main 
@@ -931,7 +888,7 @@ export function App() {
             isStealth={isStealth}
             theme={userPrefs.theme || 'dark'}
             chartPalette={userPrefs.chartPalette || 'default'}
-            onOpenThemeSettings={handleOpenSettingsModal}
+            onOpenThemeSettings={() => handleOpenSettingsModal('preferences')}
           />
         )}
 
@@ -956,7 +913,7 @@ export function App() {
             {transactions.length === 0 ? (
               <div className="py-8 px-4 text-center space-y-4">
                 <div>
-                  <h3 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>가계부 준비 완료</h3>
+                  <h3 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>장부 준비 완료</h3>
                   <p className={`text-xs mt-1 ${isLight ? 'text-slate-500' : 'text-[#94A3B8]'}`}>
                     아래 입력창에 평소 대화하듯 자유롭게 입력해 보세요.
                   </p>
@@ -1183,7 +1140,7 @@ export function App() {
               <div className={`py-12 text-center text-xs ${
                 isLight ? 'text-slate-500' : 'text-[#94A3B8]'
               }`}>
-                해당 조건의 가계부 내역이 없습니다.
+                해당 조건의 장부 내역이 없습니다.
               </div>
             ) : (
               <div className="space-y-1">
@@ -1533,7 +1490,7 @@ export function App() {
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={handleOpenSettingsModal}
+              onClick={() => handleOpenSettingsModal('preferences')}
               className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors ${
                 userPrefs.autoCategorization !== false
                   ? isLight ? 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100' : 'bg-[#00F5A0]/10 text-[#00F5A0] hover:bg-[#00F5A0]/20'
@@ -1561,21 +1518,7 @@ export function App() {
           </div>
         </div>
           </>
-        ) : (
-          /* Vault Mode Quick Status Bar */
-          <div className="flex items-center justify-between py-1 px-1">
-            <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full animate-pulse ${isLight ? 'bg-blue-600' : 'bg-blue-400'}`} />
-              <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
-                프라이빗 암호화 자산 볼트
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] text-slate-400">
-              <ShieldCheck size={13} className="text-blue-400" />
-              <span>로컬 저장소 전용</span>
-            </div>
-          </div>
-        )}
+        ) : null}
 
         {/* Persistent Bottom Tab Navigation Switcher (Ergonomic Thumb Access) */}
         <div className={`pt-2 mt-1.5 flex items-center justify-around border-t ${
@@ -1596,7 +1539,7 @@ export function App() {
             }`}
           >
             <ShieldCheck size={18} className={mainMode === 'vault' ? 'stroke-[2.5]' : ''} />
-            <span className="text-[11px]">볼트 (자산)</span>
+            <span className="text-[11px]">자산</span>
           </button>
 
           <button
@@ -1614,7 +1557,7 @@ export function App() {
             }`}
           >
             <Wallet size={18} className={mainMode === 'ledger' ? 'stroke-[2.5]' : ''} />
-            <span className="text-[11px]">가계부 (지출)</span>
+            <span className="text-[11px]">장부</span>
           </button>
         </div>
       </footer>

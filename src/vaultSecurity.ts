@@ -12,6 +12,7 @@
 
 import { openDB, IDBPDatabase } from 'idb';
 import { Transaction, AssetAccount, DebtItem } from './types';
+import { sanitizeCacheStorage } from './usePWAInstall';
 
 // Storage constants
 const KEYSTORE_DB_NAME = 'vibe-vault-keystore';
@@ -260,6 +261,9 @@ export function lockVault(): void {
   inMemoryCryptoKey = null;
   isLocked = true;
   notifyLockState();
+
+  // Security Hardening Item #5: Evict any non-static / accidental cache entries upon lock
+  sanitizeCacheStorage().catch(() => {});
 }
 
 export async function unlockVault(pin?: string): Promise<{ success: boolean; error?: string }> {
