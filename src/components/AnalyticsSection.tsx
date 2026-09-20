@@ -3,7 +3,7 @@ import { Transaction, ChartPaletteType } from '../types';
 import { MonthlyTrendsChart } from './MonthlyTrendsChart';
 import { YearlyTrendsChart } from './YearlyTrendsChart';
 import { CategoryDonutChart } from './CategoryDonutChart';
-import { BarChart3, CalendarRange, PieChart, ChevronDown, ChevronUp, Palette } from 'lucide-react';
+import { ChevronDown, ChevronUp, Palette } from 'lucide-react';
 import { getCategoryKo } from '../utils';
 import { getChartPalette } from '../themePalettes';
 
@@ -59,7 +59,7 @@ export const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({
               setActiveTab('trends');
               if (!isOpen) setIsOpen(true);
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               isOpen && activeTab === 'trends'
                 ? isLight
                   ? 'bg-white text-slate-950 font-bold shadow-xs'
@@ -67,7 +67,6 @@ export const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({
                 : isLight ? 'text-slate-600 hover:text-slate-900' : 'text-[#94A3B8] hover:text-white'
             }`}
           >
-            <BarChart3 size={13} className={isOpen && activeTab === 'trends' ? (isLight ? 'text-emerald-600' : 'text-emerald-400') : (isLight ? 'text-slate-500' : 'text-[#94A3B8]')} />
             <span>일별 지출</span>
           </button>
 
@@ -78,7 +77,7 @@ export const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({
               setActiveTab('yearly');
               if (!isOpen) setIsOpen(true);
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               isOpen && activeTab === 'yearly'
                 ? isLight
                   ? 'bg-white text-slate-950 font-bold shadow-xs'
@@ -86,7 +85,6 @@ export const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({
                 : isLight ? 'text-slate-600 hover:text-slate-900' : 'text-[#94A3B8] hover:text-white'
             }`}
           >
-            <CalendarRange size={13} className={isOpen && activeTab === 'yearly' ? (isLight ? 'text-emerald-600' : 'text-emerald-400') : (isLight ? 'text-slate-500' : 'text-[#94A3B8]')} />
             <span>연간 추이</span>
           </button>
 
@@ -96,7 +94,7 @@ export const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({
               setActiveTab('categories');
               if (!isOpen) setIsOpen(true);
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               isOpen && activeTab === 'categories'
                 ? isLight
                   ? 'bg-white text-slate-950 font-bold shadow-xs'
@@ -104,7 +102,6 @@ export const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({
                 : isLight ? 'text-slate-600 hover:text-slate-900' : 'text-[#94A3B8] hover:text-white'
             }`}
           >
-            <PieChart size={13} className={isOpen && activeTab === 'categories' ? (isLight ? 'text-emerald-600' : 'text-emerald-400') : (isLight ? 'text-slate-500' : 'text-[#94A3B8]')} />
             <span>카테고리별 비중</span>
             {selectedCategory && (
               <span className={`w-1.5 h-1.5 rounded-full ${isLight ? 'bg-emerald-600' : 'bg-[#00F5A0]'}`} />

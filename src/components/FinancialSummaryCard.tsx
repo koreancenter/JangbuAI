@@ -1,15 +1,7 @@
 import React, { useMemo } from 'react';
 import { Transaction, FxRates } from '../types';
 import { subMonths, isSameMonth, isSameYear, parseISO, format } from 'date-fns';
-import { 
-  TrendingDown, 
-  TrendingUp, 
-  Minus, 
-  Sparkles, 
-  AlertCircle, 
-  Calendar,
-  ArrowRight
-} from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { convertCurrency, DEFAULT_FX_RATES, getCurrencySymbol } from '../utils';
 
 interface FinancialSummaryCardProps {
@@ -146,7 +138,6 @@ export const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
                 ? 'bg-emerald-50 text-emerald-800' 
                 : 'bg-[#00F5A0]/15 text-[#00F5A0]'
             }`}>
-              <Sparkles size={12} />
               <span>절약</span>
               <span className="text-[10px] font-semibold opacity-90">(-{percentChange}%)</span>
             </div>
@@ -158,19 +149,17 @@ export const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
                 ? 'bg-slate-100 text-slate-700' 
                 : 'bg-slate-800 text-slate-300'
             }`}>
-              <AlertCircle size={12} />
               <span>초과</span>
               <span className="text-[10px] font-semibold opacity-90">(+{percentChange}%)</span>
             </div>
           )}
 
           {status === 'neutral' && (
-            <div className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${
+            <div className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
               isLight 
                 ? 'bg-slate-100 text-slate-600' 
                 : 'bg-white/10 text-slate-300'
             }`}>
-              <Minus size={12} />
               <span>동일</span>
             </div>
           )}
@@ -181,10 +170,10 @@ export const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
         {/* Previous Month Spending */}
         <div className="flex flex-col justify-between">
-          <span className={`text-[11px] font-medium flex items-center gap-1 ${
+          <span className={`text-[11px] font-medium ${
             isLight ? 'text-slate-500' : 'text-[#94A3B8]'
           }`}>
-            <Calendar size={12} /> 지난달 ({prevMonthName})
+            지난달 ({prevMonthName})
           </span>
           <span className={`text-base font-bold mt-1 ${
             isLight ? 'text-slate-800' : 'text-slate-200'
@@ -195,10 +184,10 @@ export const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
 
         {/* Current Month Spending */}
         <div className="flex flex-col justify-between">
-          <span className={`text-[11px] font-medium flex items-center gap-1 ${
+          <span className={`text-[11px] font-medium ${
             isLight ? 'text-slate-500' : 'text-[#94A3B8]'
           }`}>
-            <Calendar size={12} /> 이번 달 ({currentMonthName})
+            이번 달 ({currentMonthName})
           </span>
           <span className={`text-base font-bold mt-1 ${
             status === 'better'

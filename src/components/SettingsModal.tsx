@@ -402,10 +402,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
   // Currency options
   const currencyOptions: CustomSelectOption[] = [
-    { value: 'KRW', label: '원화 (₩)', sublabel: '대한민국 원' },
-    { value: 'USD', label: '달러 ($)', sublabel: '미국 달러' },
-    { value: 'EUR', label: '유로 (€)', sublabel: '유럽 유로' },
-    { value: 'JPY', label: '엔화 (¥)', sublabel: '일본 엔' },
+    { value: 'KRW', label: '원화 (₩)' },
+    { value: 'USD', label: '달러 ($)' },
+    { value: 'EUR', label: '유로 (€)' },
+    { value: 'JPY', label: '엔화 (¥)' },
   ];
 
   const handleProviderChange = (newProvider: string) => {
@@ -1117,30 +1117,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           )}
 
           {/* TAB 2: GENERAL PREFERENCES (Compact, Elegant, Non-scrolling iOS Grouped Style) */}
+          {/* TAB 2: GENERAL SETTINGS (일반 설정) - Flattened minimalist layout without box-in-box cards */}
           {activeTab === 'preferences' && (
-            <div className="space-y-4 animate-in fade-in duration-150">
+            <div className="space-y-5 animate-in fade-in duration-150">
               
               {/* Group 1: 화면 및 테마 (Display & Theme) */}
-              <div className="space-y-1.5">
-                <span className={`text-[11px] font-bold px-1 uppercase tracking-wider block ${
+              <div className="space-y-3">
+                <span className={`text-[11px] font-bold uppercase tracking-wider block ${
                   isLight ? 'text-slate-400' : 'text-slate-500'
                 }`}>
                   화면 및 테마
                 </span>
                 
-                <div className={`p-3 rounded-2xl border space-y-3.5 ${
-                  isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-white/[0.02] border-white/5'
-                }`}>
+                <div className={`space-y-3 pb-4 border-b ${isLight ? 'border-slate-200/80' : 'border-white/[0.06]'}`}>
                   {/* Row 1: 기본 시작 화면 (자산 | 장부) */}
                   <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
-                        기본 시작 화면
-                      </span>
-                      <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                        앱 실행 시 첫 화면을 지정합니다
-                      </span>
-                    </div>
+                    <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                      기본 시작 화면
+                    </span>
                     <div className={`flex p-0.5 rounded-xl border ${
                       isLight ? 'bg-slate-200/70 border-slate-300/60' : 'bg-black/40 border-white/5'
                     }`}>
@@ -1189,8 +1183,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                     </div>
                   </div>
 
-                  {/* Row 2: 화면 테마 (다크 | 라이트 | 시스템 - 아이콘 삭제) */}
-                  <div className="flex items-center justify-between gap-3 pt-1 border-t border-inherit">
+                  {/* Row 2: 화면 테마 (다크 | 라이트 | 시스템) */}
+                  <div className={`flex items-center justify-between gap-3 pt-3 border-t ${
+                    isLight ? 'border-slate-100' : 'border-white/[0.04]'
+                  }`}>
                     <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
                       화면 테마
                     </span>
@@ -1248,12 +1244,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                     </div>
                   </div>
 
-                  {/* Row 3: 차트 컬러 (4열 그리드로 전체 표시, 이모지 제거) */}
-                  <div className="pt-1 border-t border-inherit space-y-2">
+                  {/* Row 3: 차트 컬러 */}
+                  <div className={`pt-3 border-t space-y-2.5 ${
+                    isLight ? 'border-slate-100' : 'border-white/[0.04]'
+                  }`}>
                     <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
                       차트 컬러
                     </span>
-                    <div className="grid grid-cols-4 gap-1.5">
+                    <div className="grid grid-cols-4 gap-2">
                       {Object.values(CHART_PALETTES).map((palette) => {
                         const isSelected = chartPalette === palette.id;
                         return (
@@ -1263,14 +1261,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                             id={`chart-palette-btn-${palette.id}`}
                             onClick={() => handleChartPaletteChange(palette.id)}
                             title={`${palette.name} (${palette.subtitle})`}
-                            className={`py-2 px-1 rounded-xl border transition-all flex flex-col items-center justify-center gap-1.5 active:scale-95 ${
+                            className={`py-2 px-1.5 rounded-xl border transition-all flex flex-col items-center justify-center gap-1.5 active:scale-95 ${
                               isSelected
                                 ? isLight
-                                  ? 'bg-white border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
-                                  : 'bg-white/10 border-[#00F5A0] ring-2 ring-[#00F5A0]/20 text-white'
+                                  ? 'bg-emerald-50/80 border-emerald-500 ring-1 ring-emerald-500/20 text-emerald-800 shadow-2xs'
+                                  : 'bg-emerald-500/10 border-[#00F5A0] ring-1 ring-[#00F5A0]/20 text-white shadow-2xs'
                                 : isLight
-                                  ? 'bg-white/60 border-slate-200 hover:bg-white text-slate-600'
-                                  : 'bg-black/20 border-white/5 hover:bg-white/[0.05] text-slate-400 hover:text-slate-200'
+                                  ? 'bg-slate-100/70 border-slate-200/80 hover:bg-slate-100 text-slate-600'
+                                  : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.06] text-slate-400 hover:text-slate-200'
                             }`}
                           >
                             <div className="flex items-center -space-x-1">
@@ -1298,25 +1296,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               </div>
 
               {/* Group 2: 표시 및 통화 (Display & Currency) */}
-              <div className="space-y-1.5">
-                <span className={`text-[11px] font-bold px-1 uppercase tracking-wider block ${
+              <div className="space-y-3">
+                <span className={`text-[11px] font-bold uppercase tracking-wider block ${
                   isLight ? 'text-slate-400' : 'text-slate-500'
                 }`}>
                   표시 및 통화
                 </span>
-                <div className={`p-3 rounded-2xl border space-y-3 ${
-                  isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-white/[0.02] border-white/5'
-                }`}>
+                
+                <div className={`space-y-3 pb-4 border-b ${isLight ? 'border-slate-200/80' : 'border-white/[0.06]'}`}>
                   {/* Row 1: 기본 통화 */}
                   <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
-                        기본 통화
-                      </span>
-                      <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                        자산 및 장부 기준 통화 단위
-                      </span>
-                    </div>
+                    <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                      기본 통화
+                    </span>
                     <div className="w-28">
                       <CustomDarkSelect
                         id="currency-select"
@@ -1334,7 +1326,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                     </div>
                   </div>
 
-                  {/* Row 2: 스텔스 모드 (금액 숨김 - 전체 행 클릭 가능) */}
+                  {/* Row 2: 스텔스 모드 (금액 숨김) */}
                   <div
                     onClick={() => {
                       const next = !stealthMode;
@@ -1343,18 +1335,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                       saveUserPreferences({ ...prefs, stealthMode: next });
                       if (onDataChanged) onDataChanged();
                     }}
-                    className="flex items-center justify-between gap-3 pt-2 border-t border-inherit cursor-pointer select-none group"
+                    className={`flex items-center justify-between gap-3 pt-3 border-t cursor-pointer select-none group ${
+                      isLight ? 'border-slate-100' : 'border-white/[0.04]'
+                    }`}
                   >
-                    <div>
-                      <span className={`text-xs font-semibold block group-hover:text-emerald-500 transition-colors ${
-                        isLight ? 'text-slate-800' : 'text-slate-200'
-                      }`}>
-                        스텔스 모드 (금액 숨김)
-                      </span>
-                      <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                        공공장소에서 민감한 총액 숨기기
-                      </span>
-                    </div>
+                    <span className={`text-xs font-semibold group-hover:text-emerald-500 transition-colors ${
+                      isLight ? 'text-slate-800' : 'text-slate-200'
+                    }`}>
+                      스텔스 모드 (금액 숨김)
+                    </span>
                     <button
                       id="toggle-stealth-mode"
                       type="button"
@@ -1378,25 +1367,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               </div>
 
               {/* Group 3: 장부 설정 (Ledger Settings) */}
-              <div className="space-y-1.5">
-                <span className={`text-[11px] font-bold px-1 uppercase tracking-wider block ${
+              <div className="space-y-3">
+                <span className={`text-[11px] font-bold uppercase tracking-wider block ${
                   isLight ? 'text-slate-400' : 'text-slate-500'
                 }`}>
                   장부 설정
                 </span>
-                <div className={`p-3 rounded-2xl border space-y-3 ${
-                  isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-white/[0.02] border-white/5'
-                }`}>
+                
+                <div className="space-y-3">
                   {/* Row 1: 예산 시작일 */}
                   <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
-                        예산 시작일
-                      </span>
-                      <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                        월간 지출 및 예산 정산 기준일
-                      </span>
-                    </div>
+                    <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                      예산 시작일
+                    </span>
                     <div className="w-24">
                       <CustomDarkSelect
                         id="budget-start-day-select"
@@ -1415,7 +1398,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                     </div>
                   </div>
 
-                  {/* Row 2: 스마트 자동 분류 (전체 행 클릭 가능) */}
+                  {/* Row 2: 스마트 자동 분류 */}
                   <div
                     onClick={() => {
                       const next = !autoCategorization;
@@ -1424,18 +1407,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                       saveUserPreferences({ ...prefs, autoCategorization: next });
                       if (onDataChanged) onDataChanged();
                     }}
-                    className="flex items-center justify-between gap-3 pt-2 border-t border-inherit cursor-pointer select-none group"
+                    className={`flex items-center justify-between gap-3 pt-3 border-t cursor-pointer select-none group ${
+                      isLight ? 'border-slate-100' : 'border-white/[0.04]'
+                    }`}
                   >
-                    <div>
-                      <span className={`text-xs font-semibold block group-hover:text-emerald-500 transition-colors ${
-                        isLight ? 'text-slate-800' : 'text-slate-200'
-                      }`}>
-                        스마트 자동 분류
-                      </span>
-                      <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                        입력 시 AI가 카테고리를 자동 추론
-                      </span>
-                    </div>
+                    <span className={`text-xs font-semibold group-hover:text-emerald-500 transition-colors ${
+                      isLight ? 'text-slate-800' : 'text-slate-200'
+                    }`}>
+                      스마트 자동 분류
+                    </span>
                     <button
                       id="toggle-auto-categorization"
                       type="button"
