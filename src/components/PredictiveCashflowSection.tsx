@@ -52,6 +52,12 @@ export const PredictiveCashflowSection: React.FC<PredictiveCashflowSectionProps>
   const isLight = theme === 'light';
   const currSymbol = getCurrencySymbol(currentCurrency);
 
+  const formatMoney = (val: number) => {
+    const isNeg = val < 0;
+    const absVal = Math.abs(val).toLocaleString();
+    return isNeg ? `-${currSymbol}${absVal}` : `${currSymbol}${absVal}`;
+  };
+
   // Subscriptions & Forecast calculation
   const subscriptions = useMemo(() => {
     return detectSubscriptions(transactions, currentCurrency, fxRates);
@@ -63,65 +69,65 @@ export const PredictiveCashflowSection: React.FC<PredictiveCashflowSectionProps>
 
   const statusConfig = {
     HEALTHY: {
-      label: '안정권 (자금 여유)',
+      label: '안정',
       badgeClass: isLight 
         ? 'bg-emerald-50 text-emerald-800 border-emerald-300' 
         : 'bg-[#00F5A0]/15 text-[#00F5A0] border-[#00F5A0]/30',
-      icon: <ShieldCheck size={16} className="text-emerald-500" />
+      icon: <ShieldCheck size={12} className="text-emerald-500 shrink-0" />
     },
     MODERATE: {
-      label: '주의 (타이트함)',
+      label: '주의',
       badgeClass: isLight 
         ? 'bg-amber-50 text-amber-800 border-amber-300' 
         : 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-      icon: <Compass size={16} className="text-amber-500" />
+      icon: <Compass size={12} className="text-amber-500 shrink-0" />
     },
     DEFICIT_WARNING: {
-      label: '경고 (초과 위험)',
+      label: '초과 위험',
       badgeClass: isLight 
         ? 'bg-rose-50 text-rose-800 border-rose-300' 
         : 'bg-rose-500/15 text-rose-400 border-rose-500/30',
-      icon: <AlertTriangle size={16} className="text-rose-500" />
+      icon: <AlertTriangle size={12} className="text-rose-500 shrink-0" />
     }
   }[forecast.status];
 
   return (
     <div className="space-y-3 animate-in fade-in duration-200">
       {/* Top Main Forecast Section: Flat Minimalist Surface without nested card boxes or dividing lines */}
-      <div className={`p-4 sm:p-5 rounded-3xl transition-all ${
+      <div className={`p-3.5 sm:p-5 rounded-2xl sm:rounded-3xl transition-all ${
         isLight 
           ? 'bg-slate-50/70 text-slate-900' 
           : 'bg-white/[0.02] text-white'
       }`}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
               isLight ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/20 text-blue-400'
             }`}>
-              <Compass size={17} />
+              <Compass size={16} />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                  예측 현금흐름 & 런웨이 (Cashflow Runway)
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <h3 className={`text-xs sm:text-sm font-bold truncate ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  예측 현금흐름
                 </h3>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${statusConfig.badgeClass.replace(/border\S*/g, '')}`}>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0 whitespace-nowrap ${statusConfig.badgeClass.replace(/border\S*/g, '')}`}>
                   {statusConfig.icon}
                   <span>{statusConfig.label}</span>
                 </span>
               </div>
-              <p className={`text-[11px] mt-0.5 ${isLight ? 'text-slate-500' : 'text-[#94A3B8]'}`}>
-                소비 페이스 기반 월말 유동성 및 잔여 런웨이 시뮬레이션
+              <p className={`text-[11px] mt-0.5 truncate ${isLight ? 'text-slate-500' : 'text-[#94A3B8]'}`}>
+                현재 소비 속도 기준 월말 예상 잔액
               </p>
             </div>
           </div>
 
-          <div className={`px-2.5 py-1 rounded-xl flex items-center gap-2 shrink-0 ${
+          <div className={`px-2.5 py-1 rounded-xl flex items-center gap-2 shrink-0 self-start sm:self-center ${
             isLight ? 'bg-white/80' : 'bg-white/[0.04]'
           }`}>
-            <Flame size={14} className="text-amber-500" />
-            <div className="text-right">
-              <span className={`text-[10px] block ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>일일 번레이트</span>
+            <Flame size={14} className="text-amber-500 shrink-0" />
+            <div className="text-left sm:text-right">
+              <span className={`text-[10px] block ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>하루 평균 지출</span>
               <strong className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'} ${isStealth ? 'blur-xs select-none' : ''}`}>
                 {currSymbol}{forecast.dailyAverageBurn.toLocaleString()}/일
               </strong>
@@ -130,50 +136,50 @@ export const PredictiveCashflowSection: React.FC<PredictiveCashflowSectionProps>
         </div>
 
         {/* 3-Metric KPI Row: Clean Flat Surface (No divide-x lines) */}
-        <div className="grid grid-cols-3 gap-2.5 pt-2">
-          <div>
+        <div className="grid grid-cols-3 gap-2 pt-2">
+          <div className="min-w-0">
             <span className={`text-[10px] sm:text-[11px] font-medium block truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-              현재 누적 순자금
+              현재 순자금
             </span>
             <span className={`text-sm sm:text-base font-black tracking-tight mt-0.5 block truncate ${
               forecast.currentBalance >= 0 
                 ? isLight ? 'text-emerald-700' : 'text-[#00F5A0]' 
                 : 'text-rose-500'
             } ${isStealth ? 'blur-sm select-none' : ''}`}>
-              {currSymbol}{forecast.currentBalance.toLocaleString()}
+              {formatMoney(forecast.currentBalance)}
             </span>
             <span className={`text-[10px] mt-0.5 block font-medium truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
               이번 달 수입 - 지출
             </span>
           </div>
 
-          <div>
+          <div className="min-w-0">
             <span className={`text-[10px] sm:text-[11px] font-medium block truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-              월말 예상 잔액
+              월말 예상
             </span>
             <span className={`text-sm sm:text-base font-black tracking-tight mt-0.5 block truncate ${
               forecast.projectedMonthEndBalance >= 0 
                 ? isLight ? 'text-slate-900' : 'text-white' 
                 : 'text-rose-500'
             } ${isStealth ? 'blur-sm select-none' : ''}`}>
-              {currSymbol}{forecast.projectedMonthEndBalance.toLocaleString()}
+              {formatMoney(forecast.projectedMonthEndBalance)}
             </span>
             <span className={`text-[10px] mt-0.5 block font-medium truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-              잔여 {forecast.daysRemainingInMonth}일 소진 후
+              잔여 {forecast.daysRemainingInMonth}일 후
             </span>
           </div>
 
-          <div>
+          <div className="min-w-0">
             <span className={`text-[10px] sm:text-[11px] font-medium block truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-              남은 고정비/구독
+              남은 고정비
             </span>
             <span className={`text-sm sm:text-base font-black tracking-tight mt-0.5 block truncate ${
               isLight ? 'text-amber-800' : 'text-amber-300'
             } ${isStealth ? 'blur-sm select-none' : ''}`}>
-              {currSymbol}{forecast.totalUpcomingSubscriptions.toLocaleString()}
+              {formatMoney(forecast.totalUpcomingSubscriptions)}
             </span>
             <span className={`text-[10px] mt-0.5 block font-medium truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-              월말까지 결제 예정
+              결제 예정액
             </span>
           </div>
         </div>
@@ -230,16 +236,16 @@ export const PredictiveCashflowSection: React.FC<PredictiveCashflowSectionProps>
                           </div>
                           {data.actualBalance !== undefined ? (
                             <div className="text-emerald-500 font-semibold">
-                              실제 누적: {currSymbol}{data.actualBalance.toLocaleString()}
+                              실제 누적: {formatMoney(data.actualBalance)}
                             </div>
                           ) : (
                             <div className="text-blue-400 font-semibold">
-                              예상 누적: {currSymbol}{data.projectedBalance.toLocaleString()}
+                              예상 누적: {formatMoney(data.projectedBalance)}
                             </div>
                           )}
                           {data.upcomingSubscriptionSum > 0 && (
                             <div className="text-amber-400 text-[10px] mt-0.5">
-                              고정비 결제: {currSymbol}{data.upcomingSubscriptionSum.toLocaleString()}
+                              고정비 결제: {formatMoney(data.upcomingSubscriptionSum)}
                             </div>
                           )}
                         </div>

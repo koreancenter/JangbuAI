@@ -867,7 +867,7 @@ export function App() {
                     : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
               }`}
             >
-              런웨이 예측
+              현금흐름
             </button>
           </div>
 
