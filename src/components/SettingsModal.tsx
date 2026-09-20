@@ -1441,46 +1441,74 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             </div>
           )}
 
-          {/* TAB 3: DATA & PRIVACY (LOCAL-FIRST) */}
+          {/* TAB 3: DATA & PRIVACY (LOCAL-FIRST) - Flattened minimalist layout without box-in-box cards */}
           {activeTab === 'privacy' && (
-            <div className="space-y-4 animate-in fade-in duration-150">
-              {/* SECTION: ZERO-KNOWLEDGE VAULT SECURITY & AT-REST ENCRYPTION */}
-              <div className={`p-3.5 rounded-2xl border space-y-3.5 ${
-                isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900/60 border-white/10'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className={`p-1.5 rounded-lg ${isLight ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-500/15 text-emerald-400'}`}>
-                      <ShieldCheck size={16} />
-                    </div>
-                    <div>
-                      <h4 className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                        금고 보안 및 저장소 암호화 (At-Rest Protection)
-                      </h4>
-                      <p className="text-[11px] text-slate-500">
-                        Web Crypto AES-GCM-256 비추출 마스터 키로 금융 자산 데이터 실시간 보호
-                      </p>
-                    </div>
-                  </div>
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    암호화 가동 중
-                  </span>
-                </div>
+            <div className="space-y-5 animate-in fade-in duration-150">
+              {/* Group 1: 금고 보안 및 암호화 */}
+              <div className="space-y-3">
+                <span className={`text-[11px] font-bold uppercase tracking-wider block ${
+                  isLight ? 'text-slate-400' : 'text-slate-500'
+                }`}>
+                  금고 보안 및 암호화
+                </span>
 
-                {/* PIN Protection Setting */}
-                <div className="flex items-center justify-between pt-1 border-t border-white/5">
-                  <div>
-                    <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                <div className={`space-y-3 pb-4 border-b ${isLight ? 'border-slate-200/80' : 'border-white/[0.06]'}`}>
+                  {/* Row 1: 금고 보안 및 저장소 암호화 */}
+                  <div className="flex items-center justify-between gap-3">
+                    <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                      금고 보안 및 저장소 암호화
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        lockVault();
+                      }}
+                      className="px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-xs font-semibold transition-all active:scale-95"
+                    >
+                      지금 금고 잠그기
+                    </button>
+                  </div>
+
+                  {/* Row 2: 금고 보안 PIN 번호 */}
+                  <div className={`flex items-center justify-between gap-3 pt-3 border-t ${
+                    isLight ? 'border-slate-100' : 'border-white/[0.04]'
+                  }`}>
+                    <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
                       금고 보안 PIN 번호
                     </span>
-                    <span className="text-[11px] text-slate-500">
-                      {isPinSet ? 'Zero-Knowledge PIN 암호화 잠금 설정됨' : '미설정 (자동 잠금 시 기기 원터치 해제)'}
-                    </span>
-                  </div>
 
-                  {isPinSet ? (
-                    <div className="flex items-center gap-1.5">
+                    {isPinSet ? (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPinModalMode('set');
+                            setPinInput('');
+                            setPinConfirmInput('');
+                            setPinError(null);
+                            setShowPinModal(true);
+                          }}
+                          className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-colors ${
+                            isLight ? 'border-slate-300 hover:bg-slate-100 text-slate-700' : 'border-white/10 hover:bg-white/5 text-slate-300'
+                          }`}
+                        >
+                          PIN 변경
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPinModalMode('remove');
+                            setCurrentPinInput('');
+                            setPinError(null);
+                            setShowPinModal(true);
+                          }}
+                          className="text-xs px-2.5 py-1 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 font-medium transition-colors"
+                        >
+                          PIN 해제
+                        </button>
+                      </div>
+                    ) : (
                       <button
                         type="button"
                         onClick={() => {
@@ -1490,95 +1518,51 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                           setPinError(null);
                           setShowPinModal(true);
                         }}
-                        className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-colors ${
-                          isLight ? 'border-slate-300 hover:bg-slate-100 text-slate-700' : 'border-white/10 hover:bg-white/5 text-slate-300'
-                        }`}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 transition-all active:scale-95 shadow-sm"
                       >
-                        PIN 변경
+                        PIN 설정하기
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPinModalMode('remove');
-                          setCurrentPinInput('');
-                          setPinError(null);
-                          setShowPinModal(true);
+                    )}
+                  </div>
+
+                  {/* Row 3: 자동 금고 잠금 */}
+                  <div className={`flex items-center justify-between gap-3 pt-3 border-t ${
+                    isLight ? 'border-slate-100' : 'border-white/[0.04]'
+                  }`}>
+                    <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                      자동 금고 잠금
+                    </span>
+                    <div className="w-24">
+                      <CustomDarkSelect
+                        value={String(autoLockConfigState.timeoutMinutes)}
+                        options={[
+                          { value: '1', label: '1분' },
+                          { value: '5', label: '5분' },
+                          { value: '15', label: '15분' },
+                          { value: '30', label: '30분' },
+                          { value: '60', label: '1시간' },
+                          { value: '0', label: '비활성화' },
+                        ]}
+                        onChange={(val) => {
+                          const mins = parseInt(val, 10);
+                          const updated = { ...autoLockConfigState, timeoutMinutes: mins, enabled: mins > 0 };
+                          setAutoLockConfigState(updated);
+                          saveAutoLockConfig(updated);
                         }}
-                        className="text-xs px-2.5 py-1 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 font-medium transition-colors"
-                      >
-                        PIN 해제
-                      </button>
+                        theme={isLight ? 'light' : 'dark'}
+                        size="sm"
+                      />
                     </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPinModalMode('set');
-                        setPinInput('');
-                        setPinConfirmInput('');
-                        setPinError(null);
-                        setShowPinModal(true);
-                      }}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 transition-all active:scale-95 shadow-sm"
-                    >
-                      PIN 설정하기
-                    </button>
-                  )}
-                </div>
-
-                {/* Auto-Lock Inactivity Timeout */}
-                <div className="flex items-center justify-between pt-2 border-t border-white/5">
-                  <div>
-                    <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
-                      자동 금고 잠금 (비활성 타이머)
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      일정 시간 미사용 또는 브라우저 탭 전환 시 메모리 캐시 삭제 및 즉시 잠금
-                    </span>
                   </div>
-                  <div className="w-28">
-                    <CustomDarkSelect
-                      value={String(autoLockConfigState.timeoutMinutes)}
-                      options={[
-                        { value: '1', label: '1분' },
-                        { value: '5', label: '5분' },
-                        { value: '15', label: '15분 (권장)' },
-                        { value: '30', label: '30분' },
-                        { value: '60', label: '1시간' },
-                        { value: '0', label: '비활성화' },
-                      ]}
-                      onChange={(val) => {
-                        const mins = parseInt(val, 10);
-                        const updated = { ...autoLockConfigState, timeoutMinutes: mins, enabled: mins > 0 };
-                        setAutoLockConfigState(updated);
-                        saveAutoLockConfig(updated);
-                      }}
-                      theme={isLight ? 'light' : 'dark'}
-                      size="sm"
-                    />
-                  </div>
-                </div>
-
-                {/* Lock Vault Now Button */}
-                <div className="pt-2 border-t border-white/5 flex items-center justify-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      lockVault();
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-xs font-semibold transition-all active:scale-95"
-                  >
-                    <Lock size={13} />
-                    <span>지금 금고 잠그기</span>
-                  </button>
                 </div>
               </div>
 
-              {/* Backup & Restore with Last Exported status */}
-              <div className="pt-1 space-y-2.5">
+              {/* Group 2: 데이터 백업 및 복원 */}
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-300'}`}>
+                  <span className={`text-[11px] font-bold uppercase tracking-wider ${
+                    isLight ? 'text-slate-400' : 'text-slate-500'
+                  }`}>
                     데이터 백업 및 복원
                   </span>
                   <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -1586,67 +1570,60 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                   </span>
                 </div>
                 
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={handleOpenExportModal}
-                    className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-medium border transition-all active:scale-95 ${
-                      isLight 
-                        ? 'bg-white border-slate-200 hover:bg-slate-100 text-slate-800' 
-                        : 'bg-slate-900 border-slate-800 hover:border-emerald-500/50 hover:bg-slate-850 text-slate-200'
-                    }`}
-                  >
-                    <Download size={13} className={isLight ? 'text-slate-700' : 'text-slate-300'} />
-                    <span>백업 내보내기</span>
-                  </button>
+                <div className={`pb-4 border-b ${isLight ? 'border-slate-200/80' : 'border-white/[0.06]'}`}>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={handleOpenExportModal}
+                      className={`py-2 px-3 rounded-lg text-xs font-semibold border transition-all active:scale-95 ${
+                        isLight 
+                          ? 'bg-white border-slate-200 hover:bg-slate-100 text-slate-800' 
+                          : 'bg-slate-900 border-slate-800 hover:border-emerald-500/50 hover:bg-slate-850 text-slate-200'
+                      }`}
+                    >
+                      백업 내보내기
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-medium border transition-all active:scale-95 ${
-                      isLight 
-                        ? 'bg-white border-slate-200 hover:bg-slate-100 text-slate-800' 
-                        : 'bg-slate-900 border-slate-800 hover:border-emerald-500/50 hover:bg-slate-850 text-slate-200'
-                    }`}
-                  >
-                    <Upload size={13} className={isLight ? 'text-slate-700' : 'text-slate-300'} />
-                    <span>백업 복원 / 병합</span>
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".json,.enc,.vibe.enc"
-                    className="hidden"
-                    onChange={handleRestoreFile}
-                  />
-                </div>
-
-                {/* AES-GCM 256 Security Indicator */}
-                <div className="flex items-center gap-1.5 pt-0.5 text-[11px] text-slate-400">
-                  <Lock size={12} className={isLight ? 'text-slate-500' : 'text-slate-400'} />
-                  <span>AES-GCM 256 암호화 및 무손실 스마트 중복제거 병합 지원</span>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className={`py-2 px-3 rounded-lg text-xs font-semibold border transition-all active:scale-95 ${
+                        isLight 
+                          ? 'bg-white border-slate-200 hover:bg-slate-100 text-slate-800' 
+                          : 'bg-slate-900 border-slate-800 hover:border-emerald-500/50 hover:bg-slate-850 text-slate-200'
+                      }`}
+                    >
+                      백업 복원 / 병합
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".json,.enc,.vibe.enc"
+                      className="hidden"
+                      onChange={handleRestoreFile}
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Danger Zone: Clear All Data & API Keys */}
-              <div className="pt-3 space-y-2">
-                <span className={`text-xs font-semibold flex items-center gap-1.5 ${
-                  isLight ? 'text-rose-700' : 'text-rose-400'
+              {/* Group 3: 데이터 초기화 */}
+              <div className="space-y-3">
+                <span className={`text-[11px] font-bold uppercase tracking-wider block ${
+                  isLight ? 'text-rose-600' : 'text-rose-400'
                 }`}>
-                  <AlertTriangle size={13} /> 데이터 초기화 (주의)
+                  데이터 초기화
                 </span>
 
                 <button
                   type="button"
                   onClick={() => setShowDeleteModal(true)}
-                  className={`w-full py-2 px-3 rounded-lg border font-medium text-xs transition-all flex items-center justify-center gap-1.5 active:scale-95 ${
+                  className={`w-full py-2.5 px-3 rounded-lg border font-semibold text-xs transition-all active:scale-95 ${
                     isLight
                       ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700'
                       : 'bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/20 text-rose-400'
                   }`}
                 >
-                  <Trash2 size={13} />
-                  <span>모든 거래 내역 삭제 및 설정 초기화</span>
+                  모든 거래 내역 삭제 및 설정 초기화
                 </button>
               </div>
             </div>
