@@ -14,6 +14,11 @@ export interface ChartPaletteDefinition {
   textDark: string;
   accent: string;
   
+  // Theme primary accent color for UI elements (toggles, tabs, highlights, active states)
+  primaryAccent: string;
+  primaryAccentLight?: string;
+  accentContrast?: string; // Text color to overlay on solid accent ('#FFFFFF' or '#0B0F17')
+  
   // Chart specific color mappings
   income: string;
   expense: string;
@@ -30,7 +35,7 @@ export interface ChartPaletteDefinition {
 }
 
 export const CHART_PALETTES: Record<ChartPaletteType, ChartPaletteDefinition> = {
-  // 1. 🌿 세이지 그린 테마 (Sage Green Organic Mode - DESIGN.md)
+  // 1. 🌿 세이지 그린 테마 (Sage Green Organic Mode - Muted refined sage green)
   sage: {
     id: 'sage',
     name: '세이지 그린',
@@ -44,6 +49,11 @@ export const CHART_PALETTES: Record<ChartPaletteType, ChartPaletteDefinition> = 
     surface: '#FFFFFF',     // Pure White
     textDark: '#4E5E4A',    // Deep Sage
     accent: '#C86D51',      // Terracotta Accent / Alert
+    
+    // Muted refined sage green accent
+    primaryAccent: '#529E77',
+    primaryAccentLight: '#3D7A5C',
+    accentContrast: '#FFFFFF',
     
     income: '#87A96B',      // Sage Green
     expense: '#4E5E4A',     // Deep Sage
@@ -64,7 +74,7 @@ export const CHART_PALETTES: Record<ChartPaletteType, ChartPaletteDefinition> = 
     swatches: ['#87A96B', '#A3BD8F', '#4E5E4A', '#E2E7DF']
   },
 
-  // 2. 🧱 클레이 베이지 테마 (Clay Beige Minimalist Mode - DESIGN.md)
+  // 2. 🧱 클레이 베이지 테마 (Clay Beige Minimalist Mode - Warm earthy bronze / deep amber)
   clay: {
     id: 'clay',
     name: '클레이 베이지',
@@ -78,6 +88,11 @@ export const CHART_PALETTES: Record<ChartPaletteType, ChartPaletteDefinition> = 
     surface: '#F5F2EB',     // Soft Linen
     textDark: '#3E382E',    // Charcoal Brown
     accent: '#C86D51',      // Warm Terracotta
+    
+    // Warm earthy bronze / deep amber accent
+    primaryAccent: '#D97706',
+    primaryAccentLight: '#B45309',
+    accentContrast: '#FFFFFF',
     
     income: '#C2B280',      // Clay Beige
     expense: '#3E382E',     // Charcoal Brown
@@ -98,7 +113,7 @@ export const CHART_PALETTES: Record<ChartPaletteType, ChartPaletteDefinition> = 
     swatches: ['#C2B280', '#D1C5A5', '#3E382E', '#EAE5D9']
   },
 
-  // 3. 🍷 버건디 와인 테마 (Burgundy Deep Velvet Mode - DESIGN.md)
+  // 3. 🍷 버건디 와인 테마 (Burgundy Deep Velvet Mode - Elegant wine / deep rose)
   burgundy: {
     id: 'burgundy',
     name: '버건디 와인',
@@ -112,6 +127,11 @@ export const CHART_PALETTES: Record<ChartPaletteType, ChartPaletteDefinition> = 
     surface: '#2D0D14',     // Velvet Crimson
     textDark: '#F7F4F5',    // Off-White
     accent: '#D4A5A9',      // Dusty Rose
+    
+    // Elegant wine / deep rose (distinct from danger/loss red #EF4444 / #F43F5E)
+    primaryAccent: '#C0436F',
+    primaryAccentLight: '#A32D58',
+    accentContrast: '#FFFFFF',
     
     income: '#D4A5A9',      // Dusty Rose
     expense: '#800020',     // Burgundy Wine
@@ -132,7 +152,7 @@ export const CHART_PALETTES: Record<ChartPaletteType, ChartPaletteDefinition> = 
     swatches: ['#800020', '#D4A5A9', '#2D0D14', '#1C050B']
   },
 
-  // 4. 💎 클래식 에메랄드 테마 (기본 고대비 테크)
+  // 4. 💎 클래식 에메랄드 테마 (Classic Emerald - The signature vivid emerald / mint teal)
   default: {
     id: 'default',
     name: '클래식 에메랄드',
@@ -146,6 +166,11 @@ export const CHART_PALETTES: Record<ChartPaletteType, ChartPaletteDefinition> = 
     surface: '#111827',     // Slate Card
     textDark: '#F8FAFC',    // White
     accent: '#F43F5E',      // Rose Red
+    
+    // Signature vivid emerald / mint teal
+    primaryAccent: '#00F5A0',
+    primaryAccentLight: '#059669',
+    accentContrast: '#0B0F17',
     
     income: '#00F5A0',      // Electric Emerald
     expense: '#F43F5E',     // Rose Red
@@ -172,4 +197,26 @@ export function getChartPalette(paletteId?: ChartPaletteType | string | null): C
     return CHART_PALETTES[paletteId as ChartPaletteType];
   }
   return CHART_PALETTES.default;
+}
+
+/**
+ * Binds the chosen palette's primary accent color to global CSS variables
+ * (--color-accent, --color-accent-subtle, --color-accent-border, --color-accent-glow, --color-accent-contrast)
+ * on the root document element for instant real-time theme switching.
+ */
+export function applyThemeAccent(paletteId?: ChartPaletteType | string | null, isLight?: boolean): void {
+  if (typeof document === 'undefined') return;
+  const palette = getChartPalette(paletteId);
+  const root = document.documentElement;
+  const isLightMode = isLight !== undefined ? isLight : root.classList.contains('light');
+  
+  const accent = (isLightMode && palette.primaryAccentLight) ? palette.primaryAccentLight : palette.primaryAccent;
+  const contrast = palette.accentContrast || (isLightMode ? '#FFFFFF' : '#0B0F17');
+  
+  root.style.setProperty('--color-accent', accent);
+  root.style.setProperty('--color-accent-subtle', `${accent}1A`);
+  root.style.setProperty('--color-accent-border', `${accent}4D`);
+  root.style.setProperty('--color-accent-glow', `${accent}33`);
+  root.style.setProperty('--color-accent-contrast', contrast);
+  root.setAttribute('data-accent', palette.id);
 }

@@ -2,6 +2,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Asset, AssetType, AssetCategoryType, LaunchScreenMode, ChartPaletteType, SupportedCurrency, FxRates, Transaction, AssetAccount, DebtItem } from './types';
 import { getSecureGeminiApiKey, setSecureGeminiApiKey, sanitizeApiKey } from './geminiKeyManager';
+import { applyThemeAccent } from './themePalettes';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -36,7 +37,7 @@ export function getAIEngineConfig(): AIEngineConfig {
       const parsed = JSON.parse(stored);
       const effectiveKey = sanitizeApiKey(parsed.apiKey) || secureKey || '';
       return {
-        engineType: parsed.engineType || (effectiveKey ? 'byok' : 'local'),
+        engineType: parsed.engineType || 'byok',
         localModel: parsed.localModel || 'gemma-2b',
         provider: parsed.provider || 'gemini',
         modelTier: parsed.modelTier || 'gemini-3.8-flash',
@@ -46,7 +47,7 @@ export function getAIEngineConfig(): AIEngineConfig {
   } catch (e) {}
   
   return {
-    engineType: secureKey ? 'byok' : 'local',
+    engineType: 'byok',
     localModel: 'gemma-2b',
     provider: 'gemini',
     modelTier: 'gemini-3.8-flash',
@@ -74,7 +75,7 @@ export function getEffectiveTheme(theme: ThemeMode): 'dark' | 'light' {
   return theme === 'light' ? 'light' : 'dark';
 }
 
-export function applyTheme(theme: ThemeMode) {
+export function applyTheme(theme: ThemeMode, paletteId?: ChartPaletteType | string | null) {
   if (typeof document !== 'undefined') {
     const effective = getEffectiveTheme(theme);
     const root = document.documentElement;
@@ -96,6 +97,9 @@ export function applyTheme(theme: ThemeMode) {
       const themeMeta = document.querySelector('meta[name="theme-color"]');
       if (themeMeta) themeMeta.setAttribute('content', '#020617');
     }
+
+    const activePalette = paletteId || getUserPreferences().chartPalette || 'default';
+    applyThemeAccent(activePalette, effective === 'light');
   }
 }
 
@@ -173,11 +177,82 @@ export const CATEGORY_NAMES_KO: Record<string, string> = {
   Transport: '교통',
   Health: '의료/건강',
   Leisure: '문화/여가',
+  Income: '급여/수입',
+  Salary: '급여',
   Uncategorized: '미분류',
 };
 
-export function getCategoryKo(category: string): string {
-  return CATEGORY_NAMES_KO[category] || category;
+// Clean Korean subcategory translations to eliminate redundant English labels
+export const SUBCATEGORY_NAMES_KO: Record<string, string> = {
+  // Food
+  Dining: '외식',
+  Cafe: '카페/디저트',
+  Delivery: '배달',
+  Grocery: '장보기/마트',
+  // Living
+  Shopping: '쇼핑',
+  'Daily Supplies': '생필품',
+  Fashion: '패션/뷰티',
+  Convenience: '편의점',
+  General: '생활',
+  // Transport
+  'Public Transport': '대중교통',
+  Taxi: '택시/모빌리티',
+  Vehicle: '차량/주유',
+  // Fixed
+  Salary: '급여',
+  Subscription: '구독서비스',
+  Utilities: '공과금/관리비',
+  Finance: '금융/보험',
+  Savings: '적금/저축',
+  Rent: '월세',
+  // Health
+  Medical: '병원/약국',
+  Fitness: '운동/피트니스',
+  // Leisure
+  Entertainment: '문화/여가',
+  Travel: '여행/숙박',
+  Hobbies: '도서/취미',
+};
+
+export function getCategoryKo(category: string, subCategory?: string): string {
+  // If transaction category is income or salary, display clean Korean label
+  if (category === 'Income' || category === 'Salary' || subCategory === 'Salary') {
+    return '급여';
+  }
+
+  const baseKo = CATEGORY_NAMES_KO[category] || category;
+
+  if (!subCategory) {
+    return baseKo;
+  }
+
+  // If subCategory has a dedicated Korean translation, check if it duplicates base
+  const subKo = SUBCATEGORY_NAMES_KO[subCategory] || subCategory;
+
+  // Avoid repetitive combinations like "문화/여가 · 문화/여가" or "식비 · 식비"
+  if (subKo === baseKo || subCategory.toLowerCase() === category.toLowerCase()) {
+    return baseKo;
+  }
+
+  // Handle specific clean overrides
+  if (category === 'Leisure' && subCategory === 'Travel') {
+    return '여행/숙박';
+  }
+  if (category === 'Leisure' && subCategory === 'Entertainment') {
+    return '문화/여가';
+  }
+  if (category === 'Food' && subCategory === 'Dining') {
+    return '식비';
+  }
+  if (category === 'Living' && (subCategory === 'Shopping' || subCategory === 'General')) {
+    return '생활/쇼핑';
+  }
+  if (category === 'Transport' && subCategory === 'Public Transport') {
+    return '교통';
+  }
+
+  return `${baseKo} · ${subKo}`;
 }
 
 export const TRANSACTION_TYPE_KO: Record<string, string> = {

@@ -16,6 +16,7 @@ interface AnalyticsSectionProps {
   theme?: 'light' | 'dark';
   chartPalette?: ChartPaletteType;
   onOpenThemeSettings?: () => void;
+  defaultOpen?: boolean;
 }
 
 export type AnalyticsTab = 'trends' | 'yearly' | 'categories';
@@ -29,9 +30,10 @@ export const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({
   theme = 'dark',
   chartPalette = 'default',
   onOpenThemeSettings,
+  defaultOpen = false,
 }) => {
   const [activeTab, setActiveTab] = useState<AnalyticsTab>('trends');
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(defaultOpen);
 
   const isLight = theme === 'light';
   const palette = getChartPalette(chartPalette);
@@ -164,15 +166,16 @@ export const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({
 
           <button
             type="button"
+            id="toggle-chart-collapse-btn"
             onClick={() => setIsOpen(!isOpen)}
             className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs active:scale-95 transition-all ${
               isLight 
-                ? 'bg-slate-100 text-slate-600 hover:text-slate-900' 
-                : 'bg-white/[0.04] text-[#94A3B8] hover:text-white'
+                ? 'bg-slate-100 text-slate-700 hover:text-slate-950 hover:bg-slate-200' 
+                : 'bg-white/[0.06] text-slate-300 hover:text-white hover:bg-white/10'
             }`}
-            aria-label={isOpen ? '차트 접기' : '차트 펼치기'}
+            aria-label={isOpen ? '차트 접기' : '차트 보기'}
           >
-            <span className="hidden xs:inline text-[11px] font-medium">{isOpen ? '접기' : '펼치기'}</span>
+            <span className="text-[11px] font-semibold">{isOpen ? '차트 접기' : '차트 보기'}</span>
             {isOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           </button>
         </div>

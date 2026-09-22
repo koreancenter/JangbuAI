@@ -297,10 +297,10 @@ const CATEGORY_LEXICON: CategoryRule[] = [
     ],
     confidence: 0.97
   },
-  // --- Fixed: Salary & Income ---
+  // --- Income: Salary & Regular Income ---
   {
-    category: 'Fixed',
-    subCategory: 'Salary',
+    category: '급여',
+    subCategory: '정기수입',
     patterns: [
       /월급|급여|보너스|상여금|수당|용돈|배당금|이자수익|알바비|연봉|퇴직금|주급|들어옴|입금|수입|salary|paycheck|allowance/i
     ],
@@ -776,8 +776,8 @@ export function parseFinancialInputDeterministically(rawPrompt: string, debts: D
       type: 'INCOME',
       amount,
       currency,
-      category: 'Fixed',
-      subCategory: 'Salary',
+      category: '급여',
+      subCategory: '정기수입',
       description: desc,
       date: now,
       paymentMethod: /계좌|은행|bank/i.test(sanitized) ? '계좌이체' : paymentMethod,
@@ -857,8 +857,8 @@ export function parseFinancialInputDeterministically(rawPrompt: string, debts: D
   const isFallbackIncome = /월급|급여|보너스|상여금|수당|용돈|배당금|환급|이자수익|알바비|연봉|퇴직금|주급|들어옴|입금|수입|벌었|salary|paycheck|bonus|allowance/i.test(sanitized) && !/결제|지출|썼|사먹|구입|구매/i.test(sanitized);
 
   const { category: inferredCategory, subCategory: inferredSubCategory, merchant, confidence } = inferCategoryAndMerchant(sanitized);
-  const category = isFallbackIncome ? 'Fixed' : inferredCategory;
-  const subCategory = isFallbackIncome ? 'Salary' : inferredSubCategory;
+  const category = isFallbackIncome ? '급여' : inferredCategory;
+  const subCategory = isFallbackIncome ? '정기수입' : inferredSubCategory;
   const type = isFallbackIncome ? 'INCOME' : 'EXPENSE';
 
   let cleanDesc = sanitized

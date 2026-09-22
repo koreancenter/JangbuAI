@@ -51,7 +51,7 @@ import {
 import { getAllTransactions, addTransactions, clearAllTransactions, replaceAllTransactions } from '../db';
 import { Transaction, ChartPaletteType, EncryptedBackupPayload, UnencryptedBackupPayloadV2 } from '../types';
 import { SmartAssetSetup } from './SmartAssetSetup';
-import { CHART_PALETTES } from '../themePalettes';
+import { CHART_PALETTES, applyThemeAccent } from '../themePalettes';
 import {
   encryptBackupData,
   decryptBackupData,
@@ -70,6 +70,15 @@ import {
   VaultLockConfig
 } from '../vaultSecurity';
 import { evictAllServiceWorkerCaches } from '../usePWAInstall';
+import {
+  checkWebGPUSupport,
+  isWebLLMModelCached,
+  isLocalLLMReady,
+  downloadAndInitWebLLM,
+  cancelWebLLMDownload,
+  purgeWebLLMCache,
+  ModelDownloadProgress
+} from '../webllmManager';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -217,10 +226,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   const [activeTab, setActiveTab] = useState<'assets' | 'engine' | 'preferences' | 'privacy'>(resolveSafeTab(initialTab));
 
   // Tab 1: AI Engine state
-  const [engineType, setEngineType] = useState<'local' | 'byok'>('local');
+  const [engineType, setEngineType] = useState<'local' | 'byok'>('byok');
   const [localModel, setLocalModel] = useState<'gemma-2b' | 'llama3-8b'>('gemma-2b');
   const [provider, setProvider] = useState<'gemini' | 'openai' | 'anthropic'>('gemini');
-  const [modelTier, setModelTier] = useState<string>('1.5-flash');
+  const [modelTier, setModelTier] = useState<string>('gemini-3.8-flash');
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [isTestingKey, setIsTestingKey] = useState(false);
@@ -228,6 +237,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     status: null,
     message: ''
   });
+
+  // WebLLM Tier 3 state
+  const [webGpuStatus, setWebGpuStatus] = useState<{ supported: boolean; reason?: string } | null>(null);
+  const [isModelDownloaded, setIsModelDownloaded] = useState<boolean>(false);
+  const [isDownloadingModel, setIsDownloadingModel] = useState<boolean>(false);
+  const [downloadProgress, setDownloadProgress] = useState<ModelDownloadProgress | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   // Tab 2: Financial Preferences state
   const [budgetStartDay, setBudgetStartDay] = useState<number>(1);
@@ -284,13 +300,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       }
       // Load current AI Engine config
       const engineCfg = getAIEngineConfig();
-      setEngineType(engineCfg.engineType || 'local');
+      setEngineType(engineCfg.engineType || 'byok');
       setLocalModel(engineCfg.localModel || 'gemma-2b');
       setProvider(engineCfg.provider || 'gemini');
       setModelTier(engineCfg.modelTier || (engineCfg.provider === 'openai' ? 'gpt-4o-mini' : 'gemini-3.8-flash'));
       setApiKey(engineCfg.apiKey || getSecureGeminiApiKey() || '');
       setShowKey(false);
       setTestResult({ status: null, message: '' });
+
+      // Check WebGPU hardware & model cache state
+      checkWebGPUSupport().then(res => setWebGpuStatus(res));
+      setIsModelDownloaded(isWebLLMModelCached() || isLocalLLMReady());
 
       // Load User Preferences
       const prefs = getUserPreferences();
@@ -299,6 +319,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       setStealthMode(prefs.stealthMode ?? false);
       setTheme(prefs.theme || 'dark');
       setChartPalette(prefs.chartPalette || 'default');
+      applyThemeAccent(prefs.chartPalette || 'default', getEffectiveTheme(prefs.theme || 'dark') === 'light');
       setAutoCategorization(prefs.autoCategorization !== undefined ? !!prefs.autoCategorization : true);
       setDefaultLaunchScreen(prefs.defaultLaunchScreen || 'vault');
 
@@ -353,7 +374,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
   const handleThemeChange = (newTheme: ThemeMode) => {
     setTheme(newTheme);
-    applyTheme(newTheme);
+    applyTheme(newTheme, chartPalette);
+    applyThemeAccent(chartPalette, getEffectiveTheme(newTheme) === 'light');
     const prefs = getUserPreferences();
     saveUserPreferences({ ...prefs, theme: newTheme, autoCategorization });
     if (onDataChanged) onDataChanged();
@@ -361,6 +383,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
   const handleChartPaletteChange = (newPalette: ChartPaletteType) => {
     setChartPalette(newPalette);
+    applyThemeAccent(newPalette, isLight);
     const prefs = getUserPreferences();
     saveUserPreferences({ ...prefs, chartPalette: newPalette });
     if (onDataChanged) onDataChanged();
@@ -460,6 +483,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     } finally {
       setIsTestingKey(false);
     }
+  };
+
+  // WebLLM Tier 3 Download & Purge Actions
+  const handleStartWebLLMDownload = async () => {
+    setDownloadError(null);
+    setIsDownloadingModel(true);
+    setDownloadProgress({
+      progress: 0,
+      loadedMB: 0,
+      totalMB: localModel === 'llama3-8b' ? 4500 : 1520,
+      text: '다운로드 준비 중...'
+    });
+
+    try {
+      await downloadAndInitWebLLM(localModel, (prog) => {
+        setDownloadProgress(prog);
+      });
+      setIsModelDownloaded(true);
+      setStatusMessage({ type: 'success', text: '온디바이스 AI 모델 가중치가 안전하게 로컬에 준비되었습니다.' });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDownloadError(msg);
+      setStatusMessage({ type: 'error', text: `다운로드 실패: ${msg}` });
+    } finally {
+      setIsDownloadingModel(false);
+    }
+  };
+
+  const handleCancelWebLLMDownload = () => {
+    cancelWebLLMDownload();
+    setIsDownloadingModel(false);
+    setDownloadProgress(null);
+    setStatusMessage({ type: 'error', text: '모델 다운로드가 취소되었습니다.' });
+  };
+
+  const handlePurgeWebLLMCache = async () => {
+    await purgeWebLLMCache();
+    setIsModelDownloaded(false);
+    setDownloadProgress(null);
+    setStatusMessage({ type: 'success', text: '온디바이스 모델 가중치(1.5GB+) 및 캐시가 완전히 삭제되었습니다.' });
   };
 
   // Save Settings
@@ -767,7 +830,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       onClick={onClose}
     >
       <div 
-        className={`w-full max-w-md rounded-t-3xl sm:rounded-3xl backdrop-blur-2xl border shadow-2xl flex flex-col h-[84dvh] sm:h-[630px] overflow-hidden animate-in slide-in-from-bottom-6 duration-200 transition-colors ${
+        className={`w-full max-w-md rounded-t-3xl sm:rounded-3xl max-md:rounded-b-none max-md:fixed max-md:bottom-0 max-md:max-h-[90vh] backdrop-blur-2xl border shadow-2xl flex flex-col h-[84dvh] sm:h-[630px] overflow-hidden animate-in slide-in-from-bottom-6 duration-200 transition-colors ${
           isLight
             ? 'bg-white/98 border-slate-200 text-slate-900 shadow-slate-300/40'
             : 'bg-[#0E1524]/95 border-white/10 text-slate-100 shadow-2xl'
@@ -800,18 +863,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           </button>
         </div>
 
-        {/* Tab Bar: Simple text links, NO background pills, NO horizontal overflow */}
-        <div className={`grid grid-cols-4 border-b shrink-0 px-4 sm:px-6 transition-colors ${
+        {/* Tab Bar: Horizontal scrollable with touch-friendly spacing */}
+        <div className={`flex sm:grid sm:grid-cols-4 border-b shrink-0 px-3 sm:px-6 overflow-x-auto no-scrollbar scrollbar-none transition-colors ${
           isLight ? 'border-slate-200' : 'border-white/10'
         }`}>
           <button
             id="tab-assets"
             onClick={() => setActiveTab('assets')}
-            className={`py-3 text-xs text-center transition-colors relative whitespace-nowrap ${
+            style={activeTab === 'assets' ? { borderBottomColor: 'var(--color-accent)' } : undefined}
+            className={`py-3 px-3 sm:px-1 text-xs text-center transition-colors relative whitespace-nowrap shrink-0 flex-1 ${
               activeTab === 'assets'
                 ? isLight
-                  ? 'text-slate-950 font-bold border-b-2 border-slate-950'
-                  : 'text-white font-bold border-b-2 border-white'
+                  ? 'text-slate-950 font-bold border-b-2 border-[var(--color-accent)]'
+                  : 'text-white font-bold border-b-2 border-[var(--color-accent)]'
                 : isLight
                   ? 'text-slate-500 hover:text-slate-900 font-medium'
                   : 'text-slate-400 hover:text-white font-medium'
@@ -823,11 +887,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           <button
             id="tab-ai-engine"
             onClick={() => setActiveTab('engine')}
-            className={`py-3 text-xs text-center transition-colors relative whitespace-nowrap ${
+            style={activeTab === 'engine' ? { borderBottomColor: 'var(--color-accent)' } : undefined}
+            className={`py-3 px-3 sm:px-1 text-xs text-center transition-colors relative whitespace-nowrap shrink-0 flex-1 ${
               activeTab === 'engine'
                 ? isLight
-                  ? 'text-slate-950 font-bold border-b-2 border-slate-950'
-                  : 'text-white font-bold border-b-2 border-white'
+                  ? 'text-slate-950 font-bold border-b-2 border-[var(--color-accent)]'
+                  : 'text-white font-bold border-b-2 border-[var(--color-accent)]'
                 : isLight
                   ? 'text-slate-500 hover:text-slate-900 font-medium'
                   : 'text-slate-400 hover:text-white font-medium'
@@ -839,11 +904,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           <button
             id="tab-prefs"
             onClick={() => setActiveTab('preferences')}
-            className={`py-3 text-xs text-center transition-colors relative whitespace-nowrap ${
+            style={activeTab === 'preferences' ? { borderBottomColor: 'var(--color-accent)' } : undefined}
+            className={`py-3 px-3 sm:px-1 text-xs text-center transition-colors relative whitespace-nowrap shrink-0 flex-1 ${
               activeTab === 'preferences'
                 ? isLight
-                  ? 'text-slate-950 font-bold border-b-2 border-slate-950'
-                  : 'text-white font-bold border-b-2 border-white'
+                  ? 'text-slate-950 font-bold border-b-2 border-[var(--color-accent)]'
+                  : 'text-white font-bold border-b-2 border-[var(--color-accent)]'
                 : isLight
                   ? 'text-slate-500 hover:text-slate-900 font-medium'
                   : 'text-slate-400 hover:text-white font-medium'
@@ -855,11 +921,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           <button
             id="tab-data"
             onClick={() => setActiveTab('privacy')}
-            className={`py-3 text-xs text-center transition-colors relative whitespace-nowrap ${
+            style={activeTab === 'privacy' ? { borderBottomColor: 'var(--color-accent)' } : undefined}
+            className={`py-3 px-3 sm:px-1 text-xs text-center transition-colors relative whitespace-nowrap shrink-0 flex-1 ${
               activeTab === 'privacy'
                 ? isLight
-                  ? 'text-slate-950 font-bold border-b-2 border-slate-950'
-                  : 'text-white font-bold border-b-2 border-white'
+                  ? 'text-slate-950 font-bold border-b-2 border-[var(--color-accent)]'
+                  : 'text-white font-bold border-b-2 border-[var(--color-accent)]'
                 : isLight
                   ? 'text-slate-500 hover:text-slate-900 font-medium'
                   : 'text-slate-400 hover:text-white font-medium'
@@ -895,37 +962,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           )}
 
           {/* TAB 1: AI ENGINE CONFIGURATION */}
+          {/* TAB 1: AI ENGINE CONFIGURATION (3-Tier Hybrid Strategy) */}
           {activeTab === 'engine' && (
             <div className="space-y-4 animate-in fade-in duration-150">
+              {/* Architecture Explanation Banner */}
+              <div className={`p-2.5 rounded-xl border text-xs leading-relaxed flex items-start gap-2 ${
+                isLight ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-white/[0.02] border-white/10 text-slate-300'
+              }`}>
+                <Sparkles size={14} className="text-emerald-500 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <div className="font-semibold text-[11px] text-emerald-500">3단계 하이브리드 AI 파이프라인</div>
+                  <p className="text-[11px] opacity-90">
+                    텍스트 SMS/영수증은 <strong>로컬 정규식(Tier 1)</strong>으로 즉시 처리되며, 사진 OCR은 <strong>클라우드 AI(Tier 2)</strong> 또는 <strong>온디바이스 WebLLM(Tier 3)</strong>으로 자동 분기됩니다.
+                  </p>
+                </div>
+              </div>
+
               <div className="flex flex-col gap-2">
-                <span className={`text-xs font-semibold ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>AI 처리 방식</span>
+                <span className={`text-xs font-semibold ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>AI 처리 방식 선택</span>
                 
-                {/* 2-Card Segment Selector */}
+                {/* 2-Card Segment Selector: Cloud AI (Recommended) & On-Device AI (Beta / Labs) */}
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setEngineType('local')}
-                    className={`p-2.5 rounded-xl border text-left transition-all flex flex-col gap-1 ${
-                      engineType === 'local'
-                        ? isLight
-                          ? 'border-emerald-500 bg-emerald-50 text-slate-900 shadow-xs'
-                          : 'border-[#00F5A0]/70 bg-[#00F5A0]/10 text-white shadow-sm'
-                        : isLight
-                          ? 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                          : 'border-white/10 bg-white/[0.02] text-[#94A3B8] hover:border-white/20 hover:text-slate-200'
-                    }`}
-                  >
-                    <div className={`flex items-center gap-1.5 font-semibold text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                      <Cpu size={14} className={engineType === 'local' ? (isLight ? 'text-emerald-600' : 'text-[#00F5A0]') : (isLight ? 'text-slate-400' : 'text-[#94A3B8]')} />
-                      <span>온디바이스 AI</span>
-                    </div>
-                    <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-[#94A3B8]'}`}>100% 기기 내 처리, 오프라인 작동</span>
-                  </button>
-
-                  <button
-                    type="button"
                     onClick={() => setEngineType('byok')}
-                    className={`p-2.5 rounded-xl border text-left transition-all flex flex-col gap-1 ${
+                    className={`p-2.5 rounded-xl border text-left transition-all flex flex-col gap-1 relative ${
                       engineType === 'byok'
                         ? isLight
                           ? 'border-emerald-500 bg-emerald-50 text-slate-900 shadow-xs'
@@ -935,31 +996,92 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                           : 'border-white/10 bg-white/[0.02] text-[#94A3B8] hover:border-white/20 hover:text-slate-200'
                     }`}
                   >
-                    <div className={`flex items-center gap-1.5 font-semibold text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                      <KeyRound size={14} className={engineType === 'byok' ? (isLight ? 'text-emerald-600' : 'text-[#00F5A0]') : (isLight ? 'text-slate-400' : 'text-[#94A3B8]')} />
-                      <span>클라우드 AI (API 키)</span>
+                    <div className="flex items-center justify-between">
+                      <div className={`flex items-center gap-1.5 font-semibold text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                        <KeyRound size={14} className={engineType === 'byok' ? (isLight ? 'text-emerald-600' : 'text-[#00F5A0]') : (isLight ? 'text-slate-400' : 'text-[#94A3B8]')} />
+                        <span>클라우드 AI</span>
+                      </div>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded-full font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+                        기본 권장
+                      </span>
                     </div>
-                    <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-[#94A3B8]'}`}>Gemini, OpenAI, Claude</span>
+                    <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-[#94A3B8]'}`}>
+                      Gemini API 기반, 초고속 OCR 및 기기 발열·배터리 소모 없음
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setEngineType('local')}
+                    className={`p-2.5 rounded-xl border text-left transition-all flex flex-col gap-1 relative ${
+                      engineType === 'local'
+                        ? isLight
+                          ? 'border-amber-500 bg-amber-50 text-slate-900 shadow-xs'
+                          : 'border-amber-400/70 bg-amber-400/10 text-white shadow-sm'
+                        : isLight
+                          ? 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                          : 'border-white/10 bg-white/[0.02] text-[#94A3B8] hover:border-white/20 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className={`flex items-center gap-1.5 font-semibold text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                        <Cpu size={14} className={engineType === 'local' ? (isLight ? 'text-amber-600' : 'text-amber-400') : (isLight ? 'text-slate-400' : 'text-[#94A3B8]')} />
+                        <span>온디바이스 AI</span>
+                      </div>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded-full font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                        Beta / Labs
+                      </span>
+                    </div>
+                    <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-[#94A3B8]'}`}>
+                      WebLLM 로컬 추론, 1.5GB+ 대용량 모델 다운로드 필요
+                    </span>
                   </button>
                 </div>
               </div>
 
-              {/* On-Device Sub-Fields: Borderless row */}
+              {/* On-Device Sub-Fields (Tier 3: Experimental Labs with Warning & Download Controls) */}
               {engineType === 'local' && (
-                <div className="pt-2 space-y-2.5 animate-in fade-in slide-in-from-top-1 duration-150">
-                  <div className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border ${
-                    isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900/60 border-slate-800'
+                <div className="pt-2 space-y-3 animate-in fade-in slide-in-from-top-1 duration-150">
+                  {/* Warning Banner for Mobile & Resource Usage */}
+                  <div className={`p-3 rounded-xl border flex items-start gap-2.5 ${
+                    isLight ? 'bg-amber-50/90 border-amber-300 text-amber-900' : 'bg-amber-950/30 border-amber-500/30 text-amber-200'
                   }`}>
-                    <span className={`text-xs ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>하드웨어 가속:</span>
-                    <span className={`text-xs font-medium flex items-center gap-1.5 ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
-                      <span className={`w-2 h-2 rounded-full animate-pulse ${isLight ? 'bg-emerald-500' : 'bg-emerald-400'}`} />
-                      WebGPU 그래픽 가속 활성화됨
-                    </span>
+                    <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+                    <div className="text-xs space-y-1">
+                      <div className="font-bold flex items-center gap-1.5">
+                        <span>온디바이스 WebLLM 주의 사항</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed opacity-90">
+                        모바일 브라우저 환경에서는 1.5GB 이상의 모델 가중치 다운로드로 인해 메모리 부족(OOM) 탭 크래시나 급격한 배터리 소모가 발생할 수 있습니다. 모바일 환경에서는 <strong>클라우드 AI (Gemini)</strong>를 권장합니다.
+                      </p>
+                    </div>
                   </div>
 
+                  {/* WebGPU Status Check */}
+                  <div className={`flex items-center justify-between px-3 py-2 rounded-xl border ${
+                    isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900/60 border-slate-800'
+                  }`}>
+                    <span className={`text-xs ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>WebGPU 하드웨어 가속:</span>
+                    {webGpuStatus === null ? (
+                      <span className="text-xs text-slate-400 flex items-center gap-1">
+                        <Loader2 size={11} className="animate-spin" /> 상태 확인 중...
+                      </span>
+                    ) : webGpuStatus.supported ? (
+                      <span className={`text-xs font-medium flex items-center gap-1.5 ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
+                        <span className={`w-2 h-2 rounded-full animate-pulse ${isLight ? 'bg-emerald-500' : 'bg-emerald-400'}`} />
+                        하드웨어 가속 준비됨
+                      </span>
+                    ) : (
+                      <span className={`text-xs font-medium flex items-center gap-1 text-rose-500`}>
+                        <XCircle size={13} /> 미지원 ({webGpuStatus.reason || 'WebGPU 불가'})
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Local Model Selector */}
                   <div className="space-y-1.5">
                     <label className={`text-xs font-semibold ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
-                      온디바이스 로컬 모델
+                      온디바이스 로컬 모델 선택
                     </label>
                     <CustomDarkSelect
                       value={localModel}
@@ -967,6 +1089,94 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                       onChange={(val) => setLocalModel(val as any)}
                       theme={theme}
                     />
+                  </div>
+
+                  {/* Model Weight Download / Purge Control Box */}
+                  <div className={`p-3 rounded-xl border space-y-2.5 ${
+                    isLight ? 'bg-slate-50/80 border-slate-200' : 'bg-white/[0.02] border-white/10'
+                  }`}>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold">로컬 모델 가중치 상태</span>
+                      {isModelDownloaded ? (
+                        <span className="font-medium text-emerald-500 flex items-center gap-1 text-[11px]">
+                          <CheckCircle2 size={13} /> 다운로드 완료 (캐시됨)
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 text-[11px]">미다운로드 (약 {localModel === 'llama3-8b' ? '4.5GB' : '1.5GB'})</span>
+                      )}
+                    </div>
+
+                    {/* Progress Bar when downloading */}
+                    {isDownloadingModel && downloadProgress && (
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-[11px] text-slate-400">
+                          <span>{downloadProgress.text}</span>
+                          <span className="font-mono font-medium">{downloadProgress.progress}%</span>
+                        </div>
+                        <div className="w-full h-2 rounded-full bg-slate-700/30 overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-200"
+                            style={{ width: `${downloadProgress.progress}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {downloadError && (
+                      <div className="text-[11px] text-rose-500 flex items-center gap-1">
+                        <AlertTriangle size={12} />
+                        <span>{downloadError}</span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 pt-1">
+                      {!isModelDownloaded ? (
+                        isDownloadingModel ? (
+                          <button
+                            type="button"
+                            onClick={handleCancelWebLLMDownload}
+                            className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1.5 transition-colors ${
+                              isLight ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100' : 'bg-rose-950/40 text-rose-300 border-rose-800/40 hover:bg-rose-900/60'
+                            }`}
+                          >
+                            <X size={13} />
+                            <span>다운로드 취소</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleStartWebLLMDownload}
+                            disabled={webGpuStatus?.supported === false}
+                            className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-98 ${
+                              webGpuStatus?.supported === false
+                                ? 'opacity-40 cursor-not-allowed bg-slate-700 text-slate-300'
+                                : 'bg-emerald-500 hover:bg-emerald-600 text-slate-950'
+                            }`}
+                          >
+                            <Download size={13} />
+                            <span>모델 다운로드 ({localModel === 'llama3-8b' ? '4.5GB' : '1.5GB'})</span>
+                          </button>
+                        )
+                      ) : (
+                        <div className="flex items-center gap-2 w-full">
+                          <div className="flex-1 text-[11px] text-emerald-500 font-medium flex items-center gap-1">
+                            <Check size={13} />
+                            <span>오프라인 추론 사용 가능</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handlePurgeWebLLMCache}
+                            title="로컬 저장소 모델 가중치 삭제"
+                            className={`py-1.5 px-2.5 rounded-lg text-xs border font-medium flex items-center gap-1 transition-colors ${
+                              isLight ? 'border-slate-300 text-slate-600 hover:bg-slate-100' : 'border-slate-700 text-slate-300 hover:bg-white/10'
+                            }`}
+                          >
+                            <Trash2 size={12} />
+                            <span>캐시 삭제</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1244,12 +1454,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                     </div>
                   </div>
 
-                  {/* Row 3: 차트 컬러 */}
+                  {/* Row 3: 테마 악센트 컬러 (Theme Accent) */}
                   <div className={`pt-3 border-t space-y-2.5 ${
                     isLight ? 'border-slate-100' : 'border-white/[0.04]'
                   }`}>
                     <span className={`text-xs font-semibold block ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
-                      차트 컬러
+                      테마 악센트 컬러
                     </span>
                     <div className="grid grid-cols-4 gap-2">
                       {Object.values(CHART_PALETTES).map((palette) => {
@@ -1261,11 +1471,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                             id={`chart-palette-btn-${palette.id}`}
                             onClick={() => handleChartPaletteChange(palette.id)}
                             title={`${palette.name} (${palette.subtitle})`}
+                            style={isSelected ? {
+                              borderColor: 'var(--color-accent)',
+                              backgroundColor: 'var(--color-accent-subtle)',
+                              boxShadow: '0 0 0 1px var(--color-accent)'
+                            } : undefined}
                             className={`py-2 px-1.5 rounded-xl border transition-all flex flex-col items-center justify-center gap-1.5 active:scale-95 ${
                               isSelected
                                 ? isLight
-                                  ? 'bg-emerald-50/80 border-emerald-500 ring-1 ring-emerald-500/20 text-emerald-800 shadow-2xs'
-                                  : 'bg-emerald-500/10 border-[#00F5A0] ring-1 ring-[#00F5A0]/20 text-white shadow-2xs'
+                                  ? 'border-[var(--color-accent)] ring-1 ring-[var(--color-accent)] shadow-2xs'
+                                  : 'border-[var(--color-accent)] ring-1 ring-[var(--color-accent)] text-white shadow-2xs'
                                 : isLight
                                   ? 'bg-slate-100/70 border-slate-200/80 hover:bg-slate-100 text-slate-600'
                                   : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.06] text-slate-400 hover:text-slate-200'
@@ -1280,11 +1495,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                                 />
                               ))}
                             </div>
-                            <span className={`text-[11px] truncate w-full text-center ${
-                              isSelected
-                                ? isLight ? 'text-emerald-700 font-bold' : 'text-[#00F5A0] font-bold'
-                                : 'font-medium'
-                            }`}>
+                            <span
+                              style={isSelected ? { color: 'var(--color-accent)' } : undefined}
+                              className={`text-[11px] truncate w-full text-center ${
+                                isSelected
+                                  ? 'font-bold'
+                                  : 'font-medium'
+                              }`}
+                            >
                               {palette.name.split(' ')[0]}
                             </span>
                           </button>
@@ -1339,7 +1557,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                       isLight ? 'border-slate-100' : 'border-white/[0.04]'
                     }`}
                   >
-                    <span className={`text-xs font-semibold group-hover:text-emerald-500 transition-colors ${
+                    <span className={`text-xs font-semibold group-hover:text-[var(--color-accent)] transition-colors ${
                       isLight ? 'text-slate-800' : 'text-slate-200'
                     }`}>
                       스텔스 모드 (금액 숨김)
@@ -1348,9 +1566,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                       id="toggle-stealth-mode"
                       type="button"
                       aria-label="스텔스 모드 토글"
+                      style={stealthMode ? { backgroundColor: 'var(--color-accent)' } : undefined}
                       className={`w-9 h-5 rounded-full transition-colors relative flex items-center p-0.5 shrink-0 pointer-events-none ${
                         stealthMode
-                          ? 'bg-emerald-500'
+                          ? 'bg-[var(--color-accent)]'
                           : isLight
                             ? 'bg-slate-300'
                             : 'bg-slate-700'
@@ -1411,7 +1630,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                       isLight ? 'border-slate-100' : 'border-white/[0.04]'
                     }`}
                   >
-                    <span className={`text-xs font-semibold group-hover:text-emerald-500 transition-colors ${
+                    <span className={`text-xs font-semibold group-hover:text-[var(--color-accent)] transition-colors ${
                       isLight ? 'text-slate-800' : 'text-slate-200'
                     }`}>
                       스마트 자동 분류
@@ -1420,9 +1639,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                       id="toggle-auto-categorization"
                       type="button"
                       aria-label="스마트 자동 분류 토글"
+                      style={autoCategorization ? { backgroundColor: 'var(--color-accent)' } : undefined}
                       className={`w-9 h-5 rounded-full transition-colors relative flex items-center p-0.5 shrink-0 pointer-events-none ${
                         autoCategorization
-                          ? 'bg-emerald-500'
+                          ? 'bg-[var(--color-accent)]'
                           : isLight
                             ? 'bg-slate-300'
                             : 'bg-slate-700'
@@ -1464,7 +1684,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                         onClose();
                         lockVault();
                       }}
-                      className="px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-xs font-semibold transition-all active:scale-95"
+                      style={{
+                        borderColor: 'var(--color-accent-border)',
+                        backgroundColor: 'var(--color-accent-subtle)',
+                        color: 'var(--color-accent)'
+                      }}
+                      className="px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all active:scale-95 hover:opacity-90"
                     >
                       지금 금고 잠그기
                     </button>
@@ -1518,7 +1743,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                           setPinError(null);
                           setShowPinModal(true);
                         }}
-                        className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 transition-all active:scale-95 shadow-sm"
+                        style={{
+                          backgroundColor: 'var(--color-accent)',
+                          color: 'var(--color-accent-contrast)'
+                        }}
+                        className="text-xs px-3 py-1.5 rounded-lg font-bold hover:opacity-90 transition-all active:scale-95 shadow-xs"
                       >
                         PIN 설정하기
                       </button>
@@ -1668,7 +1897,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-2">
-              <div className={`p-2 rounded-xl ${isLight ? 'bg-emerald-100 text-emerald-700' : 'bg-[#00F5A0]/15 text-[#00F5A0]'}`}>
+              <div
+                style={{
+                  backgroundColor: 'var(--color-accent-subtle)',
+                  color: 'var(--color-accent)'
+                }}
+                className="p-2 rounded-xl"
+              >
                 <Download size={18} />
               </div>
               <div>
@@ -1682,8 +1917,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               isLight ? 'bg-slate-50 border-slate-200' : 'bg-white/[0.02] border-white/10'
             }`}>
               <div>
-                <span className="text-xs font-bold block flex items-center gap-1.5">
-                  <Lock size={12} className={isLight ? 'text-emerald-600' : 'text-[#00F5A0]'} />
+                <span className="text-xs font-bold flex items-center gap-1.5">
+                  <Lock size={12} style={{ color: 'var(--color-accent)' }} />
                   AES-256 비밀번호 암호화
                 </span>
                 <span className="text-[10px] text-slate-400 block mt-0.5">
@@ -1693,8 +1928,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               <button
                 type="button"
                 onClick={() => setEnablePasswordProtection(!enablePasswordProtection)}
+                style={enablePasswordProtection ? { backgroundColor: 'var(--color-accent)' } : undefined}
                 className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 shrink-0 ${
-                  enablePasswordProtection ? 'bg-emerald-500' : isLight ? 'bg-slate-300' : 'bg-slate-800'
+                  enablePasswordProtection ? 'bg-[var(--color-accent)]' : isLight ? 'bg-slate-300' : 'bg-slate-800'
                 }`}
               >
                 <div className={`w-5 h-5 rounded-full bg-white shadow-md transition-transform transform ${

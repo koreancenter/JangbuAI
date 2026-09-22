@@ -10,6 +10,21 @@
   --surface-raised-dark: rgba(255, 255, 255, 0.04);
   --surface-inset-dark: rgba(0, 0, 0, 0.25);
   --surface-subtle-border-dark: rgba(255, 255, 255, 0.08);
+
+  /* Dynamic Theme Accent System (Default: Classic Vivid Emerald / Mint Teal) */
+  --color-accent: #00F5A0;
+  --color-accent-subtle: rgba(0, 245, 160, 0.12);
+  --color-accent-border: rgba(0, 245, 160, 0.35);
+  --color-accent-glow: rgba(0, 245, 160, 0.25);
+  --color-accent-contrast: #0B0F17;
+}
+
+:root.light {
+  --color-accent: #059669;
+  --color-accent-subtle: rgba(5, 150, 105, 0.1);
+  --color-accent-border: rgba(5, 150, 105, 0.3);
+  --color-accent-glow: rgba(5, 150, 105, 0.2);
+  --color-accent-contrast: #FFFFFF;
 }
 
 body {

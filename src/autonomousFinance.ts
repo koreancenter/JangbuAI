@@ -18,6 +18,7 @@ import {
   parseFinancialInputDeterministically,
   ParsedTransactionResult 
 } from './financialParser';
+import { isLocalLLMReady } from './webllmManager';
 import { 
   saveAssetAccount, 
   getAllAssetAccounts, 
@@ -487,7 +488,16 @@ export async function parseReceiptWithResilience(
         attempts: 0
       };
     }
-    throw new Error('OFFLINE: 현재 오프라인 상태입니다. 영수증 텍스트 직접 입력 모드를 사용해주세요.');
+    // Check if on-device model is ready
+    if (isLocalLLMReady()) {
+      const localData = parseReceiptTextLocally(rawFallbackText || '오프라인 영수증 분석', defaultCurrency);
+      return {
+        receipt: localData,
+        source: 'local_deterministic',
+        attempts: 0
+      };
+    }
+    throw new Error('OFFLINE: 현재 오프라인 상태입니다. 영수증 이미지 OCR은 인터넷 연결이 필요하며, 영수증 텍스트를 직접 입력하거나 붙여넣어 주세요.');
   }
 
   // 2. Pre-flight API Key & Engine Config Resolution
@@ -501,7 +511,22 @@ export async function parseReceiptWithResilience(
     apiKey: effectiveApiKey
   };
 
-  // If BYOK is active and no key is configured anywhere, fail early with user-friendly actionable prompt
+  // Tier 3: On-Device AI mode check
+  if (effectiveConfig.engineType === 'local') {
+    if (!isLocalLLMReady() && !effectiveApiKey) {
+      if (rawFallbackText.trim()) {
+        const fallbackData = parseReceiptTextLocally(rawFallbackText, defaultCurrency);
+        return {
+          receipt: fallbackData,
+          source: 'local_fallback',
+          attempts: 0
+        };
+      }
+      throw new Error('ON_DEVICE_MODEL_NOT_READY: 온디바이스 AI(Beta / Labs) 모델이 아직 다운로드되지 않았습니다. 설정 > AI 엔진에서 모델을 다운로드하거나, 영수증 텍스트를 직접 입력해주세요.');
+    }
+  }
+
+  // Tier 2: If BYOK is active and no key is configured anywhere, fail early with user-friendly actionable prompt
   if (effectiveConfig.engineType === 'byok' && !effectiveApiKey) {
     if (rawFallbackText.trim()) {
       const fallbackData = parseReceiptTextLocally(rawFallbackText, defaultCurrency);
@@ -717,6 +742,11 @@ export async function parseBrokerageScreenshot(
   engineConfig?: AIEngineConfig,
   existingAccounts: AssetAccount[] = []
 ): Promise<ParsedScreenshotResult> {
+  // Pre-flight offline verification
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('OFFLINE: 현재 오프라인 상태입니다. 자산 스크린샷 OCR 인식은 인터넷 연결이 필요합니다. 네트워크 연결 후 다시 시도하거나 직접 계좌 잔고를 입력해주세요.');
+  }
+
   const currentKey = sanitizeApiKey(engineConfig?.apiKey) || getSecureGeminiApiKey() || '';
   const effectiveConfig: AIEngineConfig = {
     engineType: engineConfig?.engineType || (currentKey ? 'byok' : 'local'),
@@ -725,6 +755,14 @@ export async function parseBrokerageScreenshot(
     modelTier: engineConfig?.modelTier || 'gemini-3.8-flash',
     apiKey: currentKey
   };
+
+  if (effectiveConfig.engineType === 'local' && !isLocalLLMReady() && !currentKey) {
+    throw new Error('ON_DEVICE_MODEL_NOT_READY: 온디바이스 AI(Beta / Labs) 모델이 로드되지 않았습니다. 설정 > AI 엔진에서 모델을 다운로드하거나 클라우드 AI(Gemini API 키)를 활성화해주세요.');
+  }
+
+  if (effectiveConfig.engineType === 'byok' && !currentKey) {
+    throw new Error('API_KEY_REQUIRED: 클라우드 AI 스크린샷 인식을 위해 Gemini API 키가 필요합니다. 설정에서 API 키를 등록해주세요.');
+  }
 
   const res = await fetch('/api/parse-asset-screenshot', {
     method: 'POST',

@@ -193,7 +193,7 @@ export const MonthlyTrendsChart: React.FC<MonthlyTrendsChartProps> = ({
           </div>
 
           {/* Recharts Bar Chart View */}
-          <div className="w-full h-36 relative pt-1">
+          <div className="w-full h-28 sm:h-32 relative pt-0.5">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={chartData}

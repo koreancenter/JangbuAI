@@ -79,8 +79,8 @@ export function useTransactions(): UseTransactionsReturn {
           const updatedTx: Transaction = {
             ...t,
             type: 'INCOME',
-            category: 'Fixed',
-            subCategory: 'Salary',
+            category: '급여',
+            subCategory: '정기수입',
             description: cleanedDesc,
             paymentMethod: t.paymentMethod === 'Card' ? '계좌이체' : (t.paymentMethod || '계좌이체')
           };
