@@ -37,6 +37,7 @@ import {
   X
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+import { cleanMerchantTitle } from './merchantSanitizer';
 import { 
   getAIEngineConfig, 
   getCategoryKo, 
@@ -102,18 +103,8 @@ const QUICK_CHIPS = [
 ];
 
 function formatTransactionTitle(desc?: string, merchant?: string): string {
-  if (!desc) return merchant || '지출 내역';
-  let cleaned = desc.trim();
-  cleaned = cleaned.replace(/만\s*원\s*들어옴/i, '들어옴');
-  cleaned = cleaned.replace(/^[\s,·\.\-원\d]+(?:\s*원)?\s*/i, '').trim();
-  cleaned = cleaned.replace(/^원\s+/i, '').trim();
-  if (cleaned.startsWith('원 ') || cleaned === '원') {
-    cleaned = cleaned.replace(/^원\s*/, '').trim();
-  }
-  if (!cleaned || cleaned === '원') {
-    return merchant || desc || '지출 내역';
-  }
-  return cleaned;
+  if (!desc) return cleanMerchantTitle(merchant || '', '지출 내역');
+  return cleanMerchantTitle(desc, merchant || '지출 내역');
 }
 
 const EXAMPLE_PROMPTS = [

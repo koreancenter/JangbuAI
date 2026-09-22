@@ -49,141 +49,117 @@ export const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({
     <section className={`transition-all py-1 ${
       isLight ? 'text-slate-900' : 'text-white'
     }`}>
-      {/* Header bar: Sleek Segmented Switcher + Category Filter + Collapse (No horizontal divider line, no box-in-box) */}
-      <div className="flex items-center justify-between gap-2 pb-1.5">
-        {/* Segmented Switcher */}
-        <div className={`inline-flex items-center p-1 rounded-2xl flex-wrap gap-0.5 ${
-          isLight ? 'bg-slate-100' : 'bg-white/[0.04]'
-        }`}>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('trends');
-              if (!isOpen) setIsOpen(true);
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-              isOpen && activeTab === 'trends'
-                ? isLight
-                  ? 'bg-white text-slate-950 font-bold shadow-xs'
-                  : 'bg-white/10 text-white font-bold'
-                : isLight ? 'text-slate-600 hover:text-slate-900' : 'text-[#94A3B8] hover:text-white'
-            }`}
-          >
-            <span>일별 지출</span>
-          </button>
-
-          <button
-            type="button"
-            id="tab-yearly-analytics"
-            onClick={() => {
-              setActiveTab('yearly');
-              if (!isOpen) setIsOpen(true);
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-              isOpen && activeTab === 'yearly'
-                ? isLight
-                  ? 'bg-white text-slate-950 font-bold shadow-xs'
-                  : 'bg-white/10 text-white font-bold'
-                : isLight ? 'text-slate-600 hover:text-slate-900' : 'text-[#94A3B8] hover:text-white'
-            }`}
-          >
-            <span>연간 추이</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('categories');
-              if (!isOpen) setIsOpen(true);
-            }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-              isOpen && activeTab === 'categories'
-                ? isLight
-                  ? 'bg-white text-slate-950 font-bold shadow-xs'
-                  : 'bg-white/10 text-white font-bold'
-                : isLight ? 'text-slate-600 hover:text-slate-900' : 'text-[#94A3B8] hover:text-white'
-            }`}
-          >
-            <span>카테고리별 비중</span>
-            {selectedCategory && (
-              <span className={`w-1.5 h-1.5 rounded-full ${isLight ? 'bg-emerald-600' : 'bg-[#00F5A0]'}`} />
-            )}
-          </button>
-        </div>
-
-        {/* Right side controls: Category filter tag if active, Palette quick badge & Collapse/Expand button */}
-        <div className="flex items-center gap-1.5">
-          {/* Palette Badge Indicator / Quick Link */}
-          {onOpenThemeSettings ? (
-            <button
-              type="button"
-              id="analytics-theme-palette-badge"
-              onClick={onOpenThemeSettings}
-              title={`현재 차트 테마: ${palette.name} (${palette.subtitle}) - 설정에서 변경`}
-              className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-medium transition-all active:scale-95 ${
-                isLight
-                  ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                  : 'bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white'
-              }`}
-            >
-              <span
-                className="w-2 h-2 rounded-full shrink-0 shadow-2xs"
-                style={{ backgroundColor: palette.primary }}
-              />
-              <span className="truncate max-w-[110px]">{palette.name}</span>
-            </button>
-          ) : (
-            <div
-              className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-medium ${
-                isLight
-                  ? 'bg-slate-100 text-slate-700'
-                  : 'bg-white/[0.04] text-slate-300'
-              }`}
-              title={`현재 차트 테마: ${palette.name} (${palette.subtitle})`}
-            >
-              <span
-                className="w-2 h-2 rounded-full shrink-0 shadow-2xs"
-                style={{ backgroundColor: palette.primary }}
-              />
-              <span className="truncate max-w-[110px]">{palette.name}</span>
-            </div>
-          )}
-
-          {selectedCategory && (
-            <button
-              type="button"
-              onClick={() => onSelectCategory(null)}
-              className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-xl font-semibold active:scale-95 transition-all ${
-                isLight 
-                  ? 'bg-emerald-100 text-emerald-800' 
-                  : 'bg-[#00F5A0]/15 text-[#00F5A0] hover:bg-[#00F5A0]/25'
-              }`}
-            >
-              <span>{getCategoryKo(selectedCategory)}</span>
-              <span className="font-bold">×</span>
-            </button>
-          )}
-
+      {/* Chart Control Header */}
+      {!isOpen ? (
+        /* Collapsed State: Sleek single pill toggle button aligned to the right */
+        <div className="flex items-center justify-end px-1 pb-1">
           <button
             type="button"
             id="toggle-chart-collapse-btn"
-            onClick={() => setIsOpen(!isOpen)}
-            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs active:scale-95 transition-all ${
+            onClick={() => setIsOpen(true)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold active:scale-95 transition-all ${
               isLight 
                 ? 'bg-slate-100 text-slate-700 hover:text-slate-950 hover:bg-slate-200' 
                 : 'bg-white/[0.06] text-slate-300 hover:text-white hover:bg-white/10'
             }`}
-            aria-label={isOpen ? '차트 접기' : '차트 보기'}
+            aria-label="차트 분석"
           >
-            <span className="text-[11px] font-semibold">{isOpen ? '차트 접기' : '차트 보기'}</span>
-            {isOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            <span>📊 차트 분석</span>
+            <ChevronDown size={13} />
           </button>
         </div>
-      </div>
+      ) : (
+        /* Expanded State: Sub-tabs rendered inside expanded container with right-aligned collapse toggle */
+        <div className="flex items-center justify-between gap-2 pb-2">
+          {/* Sub-tabs: 일별 / 월별 (연간) / 카테고리 */}
+          <div className={`inline-flex items-center p-1 rounded-2xl flex-wrap gap-0.5 ${
+            isLight ? 'bg-slate-100' : 'bg-white/[0.04]'
+          }`}>
+            <button
+              type="button"
+              onClick={() => setActiveTab('trends')}
+              className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'trends'
+                  ? isLight
+                    ? 'bg-white text-slate-950 font-bold shadow-xs'
+                    : 'bg-white/10 text-white font-bold'
+                  : isLight ? 'text-slate-600 hover:text-slate-900' : 'text-[#94A3B8] hover:text-white'
+              }`}
+            >
+              <span>일별</span>
+            </button>
+
+            <button
+              type="button"
+              id="tab-yearly-analytics"
+              onClick={() => setActiveTab('yearly')}
+              className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'yearly'
+                  ? isLight
+                    ? 'bg-white text-slate-950 font-bold shadow-xs'
+                    : 'bg-white/10 text-white font-bold'
+                  : isLight ? 'text-slate-600 hover:text-slate-900' : 'text-[#94A3B8] hover:text-white'
+              }`}
+            >
+              <span>월별</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('categories')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'categories'
+                  ? isLight
+                    ? 'bg-white text-slate-950 font-bold shadow-xs'
+                    : 'bg-white/10 text-white font-bold'
+                  : isLight ? 'text-slate-600 hover:text-slate-900' : 'text-[#94A3B8] hover:text-white'
+              }`}
+            >
+              <span>카테고리</span>
+              {selectedCategory && (
+                <span className={`w-1.5 h-1.5 rounded-full ${isLight ? 'bg-emerald-600' : 'bg-[#00F5A0]'}`} />
+              )}
+            </button>
+          </div>
+
+          {/* Right Controls: Category reset tag & 차트 접기 toggle */}
+          <div className="flex items-center gap-1.5">
+            {selectedCategory && (
+              <button
+                type="button"
+                onClick={() => onSelectCategory(null)}
+                className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-xl font-semibold active:scale-95 transition-all ${
+                  isLight 
+                    ? 'bg-emerald-100 text-emerald-800' 
+                    : 'bg-[#00F5A0]/15 text-[#00F5A0] hover:bg-[#00F5A0]/25'
+                }`}
+              >
+                <span>{getCategoryKo(selectedCategory)}</span>
+                <span className="font-bold">×</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              id="toggle-chart-collapse-btn"
+              onClick={() => setIsOpen(false)}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold active:scale-95 transition-all ${
+                isLight 
+                  ? 'bg-slate-100 text-slate-700 hover:text-slate-950 hover:bg-slate-200' 
+                  : 'bg-white/[0.06] text-slate-300 hover:text-white hover:bg-white/10'
+              }`}
+              aria-label="차트 접기"
+            >
+              <span className="text-[11px]">차트 접기</span>
+              <ChevronUp size={13} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Collapsible Chart Viewport */}
       {isOpen && (
-        <div className="pt-2 animate-in fade-in duration-200">
+        <div className="pt-1 animate-in fade-in duration-200">
           {activeTab === 'trends' ? (
             <MonthlyTrendsChart
               transactions={transactions}
