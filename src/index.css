@@ -2,48 +2,84 @@
 
 :root {
   --surface-canvas-light: #F8FAFC;
-  --surface-raised-light: #FFFFFF;
+  --surface-raised-light: rgba(255, 255, 255, 0.85);
   --surface-inset-light: #F1F5F9;
-  --surface-subtle-border-light: #E2E8F0;
+  --surface-subtle-border-light: rgba(0, 0, 0, 0.06);
   
-  --surface-canvas-dark: #0B0F17;
-  --surface-raised-dark: rgba(255, 255, 255, 0.04);
-  --surface-inset-dark: rgba(0, 0, 0, 0.25);
-  --surface-subtle-border-dark: rgba(255, 255, 255, 0.08);
+  --surface-canvas-dark: #07090E;
+  --surface-raised-dark: rgba(255, 255, 255, 0.02);
+  --surface-inset-dark: rgba(0, 0, 0, 0.35);
+  --surface-subtle-border-dark: rgba(255, 255, 255, 0.06);
 
-  /* Dynamic Theme Accent System (Default: Classic Vivid Emerald / Mint Teal) */
-  --color-accent: #00F5A0;
-  --color-accent-subtle: rgba(0, 245, 160, 0.12);
-  --color-accent-border: rgba(0, 245, 160, 0.35);
-  --color-accent-glow: rgba(0, 245, 160, 0.25);
-  --color-accent-contrast: #0B0F17;
+  /* Quiet Luxury Accent System (Soft Mint, Champagne Sage & Muted Rose) */
+  --color-accent: #34d399; /* soft mint */
+  --color-accent-hover: #6ee7b7;
+  --color-accent-subtle: rgba(52, 211, 153, 0.08);
+  --color-accent-border: rgba(52, 211, 153, 0.2);
+  --color-accent-glow: rgba(52, 211, 153, 0.12);
+  --color-accent-contrast: #07090E;
+
+  --color-rose: #fb7185; /* soft muted rose */
+  --color-rose-subtle: rgba(251, 113, 133, 0.08);
+  --color-rose-border: rgba(251, 113, 133, 0.2);
 }
 
 :root.light {
   --color-accent: #059669;
-  --color-accent-subtle: rgba(5, 150, 105, 0.1);
-  --color-accent-border: rgba(5, 150, 105, 0.3);
-  --color-accent-glow: rgba(5, 150, 105, 0.2);
+  --color-accent-hover: #047857;
+  --color-accent-subtle: rgba(5, 150, 105, 0.08);
+  --color-accent-border: rgba(5, 150, 105, 0.2);
+  --color-accent-glow: rgba(5, 150, 105, 0.1);
   --color-accent-contrast: #FFFFFF;
+
+  --color-rose: #e11d48;
+  --color-rose-subtle: rgba(225, 29, 72, 0.06);
+  --color-rose-border: rgba(225, 29, 72, 0.18);
 }
 
 body {
   font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Refined subtle scrollbars */
+/* Tabular figures for currency amounts, metrics, and timestamps */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Quiet luxury glass surface helper classes */
+.glass-card {
+  background-color: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+  border-radius: 1rem;
+}
+
+.glass-card-light {
+  background-color: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.04);
+  border-radius: 1rem;
+}
+
+/* Subtle, quiet scrollbars */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.2);
+  background: rgba(148, 163, 184, 0.15);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.4);
+  background: rgba(148, 163, 184, 0.3);
 }

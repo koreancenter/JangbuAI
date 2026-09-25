@@ -86,7 +86,7 @@ export const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
       currentCount: currentMonthExpenses.length,
       prevCount: prevMonthExpenses.length,
     };
-  }, [transactions]);
+  }, [transactions, currencySymbol, fxRates]);
 
   const {
     now,
@@ -104,79 +104,82 @@ export const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
   return (
     <section 
       id="financial-summary-card"
-      className={`relative transition-all py-1 ${
-        isLight ? 'text-slate-900' : 'text-white'
+      className={`relative transition-all p-5 sm:p-6 rounded-2xl ${
+        isLight 
+          ? 'bg-white/80 backdrop-blur-xl border border-slate-200/80 shadow-[0_4px_20px_-2px_rgba(0,0,0,0.04)] text-slate-900' 
+          : 'bg-white/[0.02] backdrop-blur-xl border border-white/[0.06] shadow-[0_4px_20px_-2px_rgba(0,0,0,0.5)] text-white'
       }`}
     >
-      {/* Top Header: Title & Better/Worse Status Badge */}
-      <div className="flex items-center justify-between pb-2">
-        <div className="flex items-center gap-2.5">
-          <div>
-            <div className="flex items-center gap-1.5">
-              <h3 className={`text-xs font-bold tracking-tight ${
-                isLight ? 'text-slate-900' : 'text-slate-100'
-              }`}>
-                재무 요약
-              </h3>
-              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                isLight ? 'bg-slate-100 text-slate-500' : 'bg-white/5 text-[#94A3B8]'
-              }`}>
-                월별 지출 비교
-              </span>
-            </div>
-            <p className={`text-[11px] mt-0.5 ${isLight ? 'text-slate-500' : 'text-[#94A3B8]'}`}>
-              {prevMonthName} 대비 {currentMonthName} 지출 증감
-            </p>
+      {/* Top Header: Title & Subtle Status Badge */}
+      <div className="flex items-center justify-between pb-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className={`text-xs font-normal tracking-wide ${
+              isLight ? 'text-slate-800' : 'text-slate-200'
+            }`}>
+              재무 요약
+            </h3>
+            <span className="text-slate-500 font-light text-xs">·</span>
+            <span className={`text-xs font-light ${
+              isLight ? 'text-slate-500' : 'text-slate-400'
+            }`}>
+              월별 지출 비교
+            </span>
           </div>
+          <p className={`text-xs font-light mt-0.5 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+            {prevMonthName} 대비 {currentMonthName} 지출 변동
+          </p>
         </div>
 
-        {/* Quick 'Better' or 'Worse' Indicator Pill */}
+        {/* Quiet Luxury Status Indicator */}
         <div id="financial-status-indicator">
           {status === 'better' && (
-            <div className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${
+            <div className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-light border tabular-nums ${
               isLight 
-                ? 'bg-emerald-50 text-emerald-800' 
-                : 'bg-[#00F5A0]/15 text-[#00F5A0]'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
             }`}>
               <span>절약</span>
-              <span className="text-[10px] font-semibold opacity-90">(-{percentChange}%)</span>
+              <span className="text-[11px] opacity-80">(-{percentChange}%)</span>
             </div>
           )}
 
           {status === 'worse' && (
-            <div className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${
+            <div className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-light border tabular-nums ${
               isLight 
-                ? 'bg-slate-100 text-slate-700' 
-                : 'bg-slate-800 text-slate-300'
+                ? 'bg-rose-50 text-rose-800 border-rose-200' 
+                : 'bg-rose-500/10 text-rose-300 border-rose-500/20'
             }`}>
               <span>초과</span>
-              <span className="text-[10px] font-semibold opacity-90">(+{percentChange}%)</span>
+              <span className="text-[11px] opacity-80">(+{percentChange}%)</span>
             </div>
           )}
 
           {status === 'neutral' && (
-            <div className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+            <div className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-light border ${
               isLight 
-                ? 'bg-slate-100 text-slate-600' 
-                : 'bg-white/10 text-slate-300'
+                ? 'bg-slate-100 text-slate-600 border-slate-200' 
+                : 'bg-white/[0.04] text-slate-400 border-white/[0.06]'
             }`}>
-              <span>동일</span>
+              <span>유지</span>
             </div>
           )}
         </div>
       </div>
 
-      {/* Flat Single-Surface Comparison Metrics without box-in-box and horizontal divider lines */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
+      {/* Clean hairline-divided comparison metrics */}
+      <div className={`grid grid-cols-2 sm:grid-cols-3 gap-4 pt-3 border-t ${
+        isLight ? 'border-slate-200/60' : 'border-white/[0.04]'
+      }`}>
         {/* Previous Month Spending */}
         <div className="flex flex-col justify-between">
-          <span className={`text-[11px] font-medium ${
-            isLight ? 'text-slate-500' : 'text-[#94A3B8]'
+          <span className={`text-xs font-light ${
+            isLight ? 'text-slate-500' : 'text-slate-400'
           }`}>
             지난달 ({prevMonthName})
           </span>
-          <span className={`text-base font-bold mt-1 ${
-            isLight ? 'text-slate-800' : 'text-slate-200'
+          <span className={`text-base font-light mt-1.5 tabular-nums ${
+            isLight ? 'text-slate-700' : 'text-slate-300'
           } ${isStealth ? 'blur-xs select-none' : ''}`}>
             {currSymbol}{prevSpending.toLocaleString()}
           </span>
@@ -184,16 +187,16 @@ export const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
 
         {/* Current Month Spending */}
         <div className="flex flex-col justify-between">
-          <span className={`text-[11px] font-medium ${
-            isLight ? 'text-slate-500' : 'text-[#94A3B8]'
+          <span className={`text-xs font-light ${
+            isLight ? 'text-slate-500' : 'text-slate-400'
           }`}>
             이번 달 ({currentMonthName})
           </span>
-          <span className={`text-base font-bold mt-1 ${
+          <span className={`text-base font-normal mt-1.5 tabular-nums ${
             status === 'better'
-              ? isLight ? 'text-emerald-700' : 'text-[#00F5A0]'
+              ? isLight ? 'text-emerald-700' : 'text-emerald-300'
               : status === 'worse'
-              ? isLight ? 'text-slate-900' : 'text-white'
+              ? isLight ? 'text-rose-700' : 'text-rose-300'
               : isLight ? 'text-slate-900' : 'text-white'
           } ${isStealth ? 'blur-xs select-none' : ''}`}>
             {currSymbol}{currentSpending.toLocaleString()}
@@ -202,28 +205,28 @@ export const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
 
         {/* Difference Amount */}
         <div className="col-span-2 sm:col-span-1 flex flex-col justify-between">
-          <span className={`text-[11px] font-medium ${
+          <span className={`text-xs font-light ${
             status === 'better'
-              ? isLight ? 'text-emerald-800' : 'text-emerald-400'
+              ? isLight ? 'text-emerald-700' : 'text-emerald-400'
               : status === 'worse'
-              ? isLight ? 'text-slate-600' : 'text-slate-300'
-              : isLight ? 'text-slate-500' : 'text-[#94A3B8]'
+              ? isLight ? 'text-rose-700' : 'text-rose-400'
+              : isLight ? 'text-slate-500' : 'text-slate-400'
           }`}>
             전월 대비 변동
           </span>
-          <div className="flex items-baseline gap-1.5 mt-1">
-            <span className={`text-base font-bold ${
+          <div className="flex items-baseline gap-1.5 mt-1.5">
+            <span className={`text-base font-medium tabular-nums ${
               status === 'better'
-                ? isLight ? 'text-emerald-700' : 'text-[#00F5A0]'
+                ? isLight ? 'text-emerald-700' : 'text-emerald-300'
                 : status === 'worse'
-                ? isLight ? 'text-slate-800' : 'text-slate-200'
+                ? isLight ? 'text-rose-700' : 'text-rose-300'
                 : isLight ? 'text-slate-800' : 'text-white'
             } ${isStealth ? 'blur-xs select-none' : ''}`}>
               {diff > 0 ? '+' : diff < 0 ? '-' : ''}{currSymbol}{Math.abs(diff).toLocaleString()}
             </span>
             {percentChange > 0 && (
-              <span className={`text-[11px] font-medium ${
-                status === 'better' ? (isLight ? 'text-emerald-700' : 'text-[#00F5A0]') : 'text-slate-500'
+              <span className={`text-xs font-light tabular-nums ${
+                status === 'better' ? (isLight ? 'text-emerald-700' : 'text-emerald-400') : 'text-slate-400'
               }`}>
                 ({diff < 0 ? '▼' : '▲'}{percentChange}%)
               </span>
@@ -233,21 +236,25 @@ export const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
       </div>
 
       {/* Insight Statement */}
-      <div className="mt-2.5 flex items-center gap-2 text-xs">
+      <div className={`mt-3.5 pt-3 border-t flex items-center gap-2 text-xs font-light ${
+        isLight ? 'border-slate-200/60 text-slate-600' : 'border-white/[0.04] text-slate-400'
+      }`}>
         <ArrowRight size={12} className={`shrink-0 ${
           status === 'better' 
-            ? isLight ? 'text-emerald-600' : 'text-[#00F5A0]' 
+            ? isLight ? 'text-emerald-600' : 'text-emerald-400' 
+            : status === 'worse'
+            ? isLight ? 'text-rose-600' : 'text-rose-400'
             : 'text-slate-400'
         }`} />
-        <p className={`text-[11px] leading-relaxed ${isLight ? 'text-slate-600' : 'text-[#94A3B8]'}`}>
+        <p className="leading-relaxed">
           {status === 'better' && (
             <span>
-              지난달보다 <strong className="text-emerald-600 font-bold">{currSymbol}{Math.abs(diff).toLocaleString()}</strong> 절약하여 안정적으로 예산을 유지하고 있습니다.
+              지난달 대비 <span className="text-emerald-400 font-normal">{currSymbol}{Math.abs(diff).toLocaleString()}</span> 절약하여 안정적인 소비 기조를 유지하고 있습니다.
             </span>
           )}
           {status === 'worse' && (
             <span>
-              지난달 대비 <strong className="font-semibold text-slate-800 dark:text-slate-200">{currSymbol}{Math.abs(diff).toLocaleString()}</strong> 지출이 늘었습니다. 고정비와 외식 지출 내역을 확인해보세요.
+              지난달 대비 <span className="text-rose-400 font-normal">{currSymbol}{Math.abs(diff).toLocaleString()}</span> 지출이 증가했습니다. 고정비 및 식비 내역을 확인해 보세요.
             </span>
           )}
           {status === 'neutral' && (

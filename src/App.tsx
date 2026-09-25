@@ -837,14 +837,14 @@ export function App() {
                     key={f}
                     type="button"
                     onClick={() => setLedgerFilter(f as LedgerFilterType)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 transition-all ${
+                    className={`px-3 py-1.5 rounded-full text-xs shrink-0 transition-all ${
                       ledgerFilter === f
                         ? isLight
-                          ? 'bg-slate-900 text-white shadow-xs'
-                          : 'bg-white/15 text-white font-bold'
+                          ? 'bg-slate-900 text-white font-medium shadow-xs'
+                          : 'bg-white/10 text-white font-medium border border-white/20'
                         : isLight
-                          ? 'bg-slate-100 text-slate-600 hover:text-slate-950 hover:bg-slate-200'
-                          : 'bg-white/[0.04] text-[#94A3B8] hover:text-white hover:bg-white/[0.08]'
+                          ? 'bg-transparent text-slate-500 hover:text-slate-800 border border-slate-200/80 font-normal'
+                          : 'bg-transparent text-slate-400 hover:text-slate-200 border border-white/[0.06] font-normal'
                     }`}
                   >
                     {f === 'ALL' ? '전체' : f === 'EXPENSE' ? '지출' : f === 'INCOME' ? '수입' : f === 'TRANSFER' ? '이체' : '정산'}
@@ -856,38 +856,30 @@ export function App() {
                 id="export-csv-btn"
                 type="button"
                 onClick={exportCSV}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 transition-all active:scale-95 ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-normal shrink-0 transition-all active:scale-95 border ${
                   isLight 
-                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-700' 
-                    : 'bg-white/[0.06] hover:bg-white/10 text-slate-200'
+                    ? 'bg-transparent hover:bg-slate-100 text-slate-700 border-slate-200/80' 
+                    : 'bg-transparent hover:bg-white/[0.04] text-slate-300 border-white/[0.08]'
                 }`}
               >
-                <Download size={13} className={isLight ? 'text-emerald-600' : 'text-[#00F5A0]'} />
+                <Download size={13} className={isLight ? 'text-emerald-600' : 'text-emerald-400'} />
                 <span>CSV</span>
               </button>
-            </div>
-
-            {/* Mobile swipe hint text */}
-            <div className="sm:hidden flex items-center justify-between px-1 text-[11px] text-slate-400/80">
-              <span>좌우로 스와이프하여 유형 변경</span>
-              <span className="font-mono text-[10px] opacity-70">
-                {ledgerFilter === 'ALL' ? '1/5 전체' : ledgerFilter === 'EXPENSE' ? '2/5 지출' : ledgerFilter === 'INCOME' ? '3/5 수입' : ledgerFilter === 'TRANSFER' ? '4/5 이체' : '5/5 정산'}
-              </span>
             </div>
 
             {/* Empty State / Recommended Prompts */}
             {transactions.length === 0 ? (
               <div className="py-8 px-4 text-center space-y-4">
                 <div>
-                  <h3 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>장부 준비 완료</h3>
-                  <p className={`text-xs mt-1 ${isLight ? 'text-slate-500' : 'text-[#94A3B8]'}`}>
+                  <h3 className={`text-sm font-medium ${isLight ? 'text-slate-900' : 'text-white'}`}>장부 준비 완료</h3>
+                  <p className={`text-xs mt-1 font-light ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
                     아래 입력창에 평소 대화하듯 자유롭게 입력해 보세요.
                   </p>
                 </div>
                 
                 {/* Example prompts */}
                 <div className="pt-2 text-left space-y-1">
-                  <span className={`text-xs font-medium block px-1 pb-0.5 ${isLight ? 'text-slate-600' : 'text-[#94A3B8]'}`}>
+                  <span className={`text-xs font-light block px-1 pb-0.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
                     추천 입력 예시 (터치하여 실행):
                   </span>
                   <div className="space-y-0.5">
@@ -903,12 +895,12 @@ export function App() {
                         }`}
                       >
                         <div className="truncate pr-2">
-                          <span className={`font-bold mr-1.5 ${isLight ? 'text-emerald-700' : 'text-[#00F5A0]'}`}>
+                          <span className={`font-normal mr-1.5 ${isLight ? 'text-emerald-600' : 'text-emerald-400'}`}>
                             [{prompt.category}]
                           </span>
-                          <span className={isLight ? 'text-slate-900' : 'text-white'}>{prompt.text}</span>
+                          <span className={`font-light ${isLight ? 'text-slate-900' : 'text-slate-200'}`}>{prompt.text}</span>
                         </div>
-                        <ChevronRight size={13} className={`shrink-0 opacity-40 group-hover:opacity-100 transition-opacity ${isLight ? 'text-slate-400 group-hover:text-emerald-600' : 'text-[#94A3B8] group-hover:text-[#00F5A0]'}`} />
+                        <ChevronRight size={13} className={`shrink-0 opacity-40 group-hover:opacity-100 transition-opacity ${isLight ? 'text-slate-400 group-hover:text-emerald-600' : 'text-slate-400 group-hover:text-emerald-400'}`} />
                       </button>
                     ))}
                   </div>
@@ -916,10 +908,10 @@ export function App() {
               </div>
             ) : filteredLedgerTransactions.length === 0 ? (
               <div className={`py-12 text-center text-xs space-y-2 ${
-                isLight ? 'text-slate-500' : 'text-[#94A3B8]'
+                isLight ? 'text-slate-500' : 'text-slate-400'
               }`}>
-                <p>
-                  선택한 <strong className={isLight ? 'text-slate-900' : 'text-white'}>
+                <p className="font-light">
+                  선택한 <strong className={`font-medium ${isLight ? 'text-slate-900' : 'text-white'}`}>
                     [{ledgerFilter === 'ALL' ? '전체' : ledgerFilter === 'EXPENSE' ? '지출' : ledgerFilter === 'INCOME' ? '수입' : ledgerFilter === 'TRANSFER' ? '이체' : '정산'}]
                   </strong> 조건의 내역이 없습니다.
                 </p>
@@ -927,10 +919,10 @@ export function App() {
                   <button
                     type="button"
                     onClick={() => setLedgerFilter('ALL')}
-                    className={`mt-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                    className={`mt-2 px-3.5 py-1.5 rounded-full text-xs font-normal transition-all border ${
                       isLight 
-                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-800' 
-                        : 'bg-white/[0.06] hover:bg-white/10 text-white'
+                        ? 'bg-transparent hover:bg-slate-100 text-slate-800 border-slate-200/80' 
+                        : 'bg-transparent hover:bg-white/[0.04] text-slate-200 border-white/[0.08]'
                     }`}
                   >
                     전체 내역 보기
@@ -938,7 +930,7 @@ export function App() {
                 )}
               </div>
             ) : (
-              <div className="divide-y divide-white/5">
+              <div className={isLight ? 'divide-y divide-slate-100' : 'divide-y divide-white/[0.04]'}>
                 {filteredLedgerTransactions.map((t) => {
                   const isExpense = t.type === 'EXPENSE';
                   const isIncome = t.type === 'INCOME';
@@ -952,51 +944,51 @@ export function App() {
                     <div
                       key={t.id}
                       onClick={() => setSelectedActionTransaction(t)}
-                      className={`py-3 px-1 transition-colors cursor-pointer group select-none ${
+                      className={`py-3.5 px-1.5 transition-colors cursor-pointer group select-none ${
                         isLight 
-                          ? 'hover:bg-slate-100/70 active:bg-slate-200/50' 
-                          : 'hover:bg-white/[0.03] active:bg-white/[0.06]'
+                          ? 'hover:bg-slate-100/60 active:bg-slate-200/50' 
+                          : 'hover:bg-white/[0.02] active:bg-white/[0.04]'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         {/* Left: Merchant / Description Title & Clean Metadata */}
                         <div className="flex flex-col min-w-0 flex-1">
-                          <span className={`text-sm font-medium leading-snug truncate ${
-                            isLight ? 'text-slate-900' : 'text-slate-100'
+                          <span className={`text-sm font-normal leading-snug truncate ${
+                            isLight ? 'text-slate-800' : 'text-slate-200'
                           }`}>
                             {displayTitle}
                           </span>
 
-                          <div className={`flex items-center gap-1.5 text-xs font-normal mt-0.5 flex-wrap ${
+                          <div className={`flex items-center gap-1.5 text-xs font-light mt-0.5 flex-wrap ${
                             isLight ? 'text-slate-500' : 'text-slate-400'
                           }`}>
                             <span>{categoryLabel}</span>
                             {(t.paymentMethod || t.type === 'INCOME') && (
                               <>
-                                <span className="opacity-40">·</span>
+                                <span className="opacity-30">·</span>
                                 <span>{getPaymentMethodKo(t.paymentMethod, t.type)}</span>
                               </>
                             )}
-                            <span className="opacity-40">·</span>
+                            <span className="opacity-30">·</span>
                             <span>{format(parseISO(t.date), 'M.d HH:mm')}</span>
                           </div>
                         </div>
 
                         {/* Right: Amount */}
                         <div className="flex flex-col items-end shrink-0 pl-2">
-                          <span className={`text-sm font-semibold tracking-tight transition-all ${isStealth ? 'blur-sm select-none' : ''} ${
+                          <span className={`text-sm font-medium tracking-tight tabular-nums transition-all ${isStealth ? 'blur-sm select-none' : ''} ${
                             t.isInternalTransfer
                               ? isLight ? 'text-blue-600' : 'text-blue-400'
                               : isExpense 
-                                ? isLight ? 'text-slate-950' : 'text-slate-100' 
+                                ? isLight ? 'text-slate-900' : 'text-slate-200' 
                                 : isIncome || isSettlement
-                                  ? isLight ? 'text-emerald-700' : 'text-[#00F5A0]'
+                                  ? isLight ? 'text-emerald-600' : 'text-emerald-400'
                                   : isLight ? 'text-blue-600' : 'text-blue-400'
                           }`}>
                             {t.isInternalTransfer ? '⇄ ' : (isExpense ? '-' : '+')}{getCurrencySymbol(t.currency || 'KRW')}{t.amount.toLocaleString()}
                           </span>
                           {(t.currency || 'KRW') !== currentCurrency && (
-                            <span className={`text-[11px] font-normal mt-0.5 ${isLight ? 'text-slate-400' : 'text-slate-500'} ${isStealth ? 'blur-xs select-none' : ''}`}>
+                            <span className={`text-[11px] font-light mt-0.5 tabular-nums ${isLight ? 'text-slate-400' : 'text-slate-500'} ${isStealth ? 'blur-xs select-none' : ''}`}>
                               ≈ {t.isInternalTransfer ? '⇄ ' : (isExpense ? '-' : '+')}{currSymbol}{Math.round(getAmountInSelectedCurrency(t)).toLocaleString()}
                             </span>
                           )}
@@ -1005,15 +997,15 @@ export function App() {
 
                       {/* Dutch-Pay Settlement Pill */}
                       {isSettlement && (
-                        <div className={`mt-2 px-2.5 py-1 rounded-xl text-xs flex items-center justify-between font-medium ${
+                        <div className={`mt-2 px-2.5 py-1 rounded-full text-xs flex items-center justify-between font-normal ${
                           isLight 
-                            ? 'bg-emerald-50 text-emerald-800' 
-                            : 'bg-[#00F5A0]/10 text-[#00F5A0]'
+                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-100' 
+                            : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
                         }`}>
                           <span className="flex items-center gap-1.5">
                             <ArrowLeftRight size={13} /> 더치페이 정산 완료
                           </span>
-                          <span>+{currSymbol}{t.amount.toLocaleString()} 입금</span>
+                          <span className="tabular-nums">+{currSymbol}{t.amount.toLocaleString()} 입금</span>
                         </div>
                       )}
                     </div>
@@ -1246,8 +1238,8 @@ export function App() {
               className="flex items-center gap-1 shrink-0 px-1"
               title={`AI 상태: ${engineStatus} (기기 내 안전 보관)`}
             >
-              <span className={`w-2 h-2 rounded-full animate-pulse shrink-0 ${isLight ? 'bg-emerald-600' : 'bg-[#00F5A0]'}`} />
-              <span className={`hidden md:inline text-[10px] font-medium max-w-[90px] truncate ${isLight ? 'text-slate-600' : 'text-[#94A3B8]'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${isLight ? 'bg-emerald-600' : 'bg-emerald-400'}`} />
+              <span className={`hidden md:inline text-[10px] font-normal max-w-[90px] truncate ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
                 {engineStatus.split(' ')[0]}
               </span>
             </div>
@@ -1268,10 +1260,10 @@ export function App() {
               id="parse-submit-btn"
               type="submit"
               disabled={isProcessing || !input.trim() || !isOnline}
-              className="h-8 px-3 rounded-xl bg-gradient-to-r from-[#00F5A0] to-[#00D9A5] hover:opacity-95 active:scale-95 text-[#0B0F17] font-bold text-xs transition-all disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center gap-1 shadow-md shadow-[#00F5A0]/20 shrink-0"
+              className="h-8 px-3 rounded-full bg-emerald-400 hover:bg-emerald-300 active:scale-95 text-slate-950 font-medium text-xs transition-all disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center gap-1 shadow-sm shrink-0"
             >
               {isProcessing ? (
-                <Loader2 size={14} className="animate-spin text-[#0B0F17]" />
+                <Loader2 size={14} className="animate-spin text-slate-950" />
               ) : (
                 <>
                   <Sparkles size={12} />
@@ -1286,7 +1278,7 @@ export function App() {
 
         {/* Persistent Bottom Tab Navigation Switcher (Ergonomic Thumb Access) */}
         <div className={`pt-1.5 mt-1 flex items-center justify-around border-t ${
-          isLight ? 'border-slate-200/80' : 'border-white/5'
+          isLight ? 'border-slate-200/80' : 'border-white/[0.04]'
         }`}>
           <button
             id="bottom-nav-vault-btn"
@@ -1295,14 +1287,14 @@ export function App() {
             className={`flex-1 py-1 flex flex-col items-center gap-0.5 rounded-xl transition-all ${
               mainMode === 'vault'
                 ? isLight
-                  ? 'text-blue-600 font-bold'
-                  : 'text-blue-400 font-bold'
+                  ? 'text-blue-600 font-medium'
+                  : 'text-blue-400 font-medium'
                 : isLight
                 ? 'text-slate-400 hover:text-slate-700'
                 : 'text-slate-500 hover:text-slate-300'
             }`}
           >
-            <ShieldCheck size={18} className={mainMode === 'vault' ? 'stroke-[2.5]' : ''} />
+            <ShieldCheck size={18} className={mainMode === 'vault' ? 'stroke-[2]' : ''} />
             <span className="text-[11px]">자산</span>
           </button>
 
@@ -1313,14 +1305,14 @@ export function App() {
             className={`flex-1 py-1 flex flex-col items-center gap-0.5 rounded-xl transition-all ${
               mainMode === 'insights'
                 ? isLight
-                  ? 'text-indigo-600 font-bold'
-                  : 'text-indigo-400 font-bold'
+                  ? 'text-indigo-600 font-medium'
+                  : 'text-indigo-400 font-medium'
                 : isLight
                 ? 'text-slate-400 hover:text-slate-700'
                 : 'text-slate-500 hover:text-slate-300'
             }`}
           >
-            <Sparkles size={18} className={mainMode === 'insights' ? 'stroke-[2.5]' : ''} />
+            <Sparkles size={18} className={mainMode === 'insights' ? 'stroke-[2]' : ''} />
             <span className="text-[11px]">인사이트</span>
           </button>
 
@@ -1331,14 +1323,14 @@ export function App() {
             className={`flex-1 py-1 flex flex-col items-center gap-0.5 rounded-xl transition-all ${
               mainMode === 'ledger'
                 ? isLight
-                  ? 'text-emerald-600 font-bold'
-                  : 'text-[#00F5A0] font-bold'
+                  ? 'text-emerald-600 font-medium'
+                  : 'text-emerald-400 font-medium'
                 : isLight
                 ? 'text-slate-400 hover:text-slate-700'
                 : 'text-slate-500 hover:text-slate-300'
             }`}
           >
-            <Wallet size={18} className={mainMode === 'ledger' ? 'stroke-[2.5]' : ''} />
+            <Wallet size={18} className={mainMode === 'ledger' ? 'stroke-[2]' : ''} />
             <span className="text-[11px]">장부</span>
           </button>
         </div>
