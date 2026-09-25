@@ -237,3 +237,46 @@ export interface UnencryptedBackupPayloadV2 {
   assetAccounts?: AssetAccount[];
   debts?: DebtItem[];
 }
+
+// Conversational Financial Query ("Ask AI Vault") Models
+export type FinancialQueryMetric = 
+  | 'fx_gain_loss'
+  | 'category_sum'
+  | 'weekend_expense'
+  | 'total_expense'
+  | 'total_income'
+  | 'net_savings'
+  | 'merchant_expense'
+  | 'general_financial';
+
+export interface FinancialQueryParameters {
+  metric: FinancialQueryMetric;
+  dateRange?: string; // e.g. "2026-09"
+  year?: number;
+  month?: number;
+  targetCurrency?: SupportedCurrency;
+  category?: string;
+  merchantKeyword?: string;
+  querySummary?: string;
+}
+
+export interface CalculationBreakdownPill {
+  label: string;
+  value: string;
+  highlight?: boolean;
+  color?: 'emerald' | 'blue' | 'amber' | 'purple' | 'slate';
+}
+
+export interface FinancialQueryResult {
+  query: string;
+  directAnswer: string;
+  summarySentence: string;
+  breakdownPills: CalculationBreakdownPill[];
+  metric: FinancialQueryMetric;
+  parameters: FinancialQueryParameters;
+  calculatedValue: number;
+  calculatedCurrency: SupportedCurrency;
+  details?: Record<string, any>;
+  timestamp: string;
+}
+

@@ -935,6 +935,158 @@ Output a JSON array of parsed assets.`,
     }
   });
 
+  // Natural Language Financial Query Intent & Parameter Extraction (Gemini Structured Output)
+  app.post('/api/query-intent', async (req, res) => {
+    try {
+      const { query: rawQuery, prompt: rawPrompt, engineConfig } = req.body;
+      const query = String(rawQuery || rawPrompt || '').trim();
+      if (!query) {
+        return res.status(400).json({ error: '질문 내용을 입력해주세요.' });
+      }
+
+      let apiKey = process.env.GEMINI_API_KEY;
+      if (engineConfig?.engineType === 'byok' && engineConfig?.apiKey && engineConfig?.provider === 'gemini') {
+        apiKey = engineConfig.apiKey;
+      }
+
+      const today = new Date();
+      const currentYear = today.getFullYear();
+      const currentMonth = today.getMonth() + 1;
+
+      // Deterministic rule-based intent fallback
+      const parseIntentLocally = (text: string) => {
+        let metric = 'general_financial';
+        let category: string | undefined = undefined;
+        let targetCurrency = 'KRW';
+        let month = currentMonth;
+        let year = currentYear;
+        let merchantKeyword: string | undefined = undefined;
+
+        // Month matching (e.g., "9월", "8월", "2026년 9월")
+        const monthMatch = text.match(/(?:(\d{4})년\s*)?(\d{1,2})월/);
+        if (monthMatch) {
+          if (monthMatch[1]) year = parseInt(monthMatch[1], 10);
+          month = parseInt(monthMatch[2], 10);
+        } else if (/지난달|지난\s*달/i.test(text)) {
+          month = currentMonth === 1 ? 12 : currentMonth - 1;
+          if (currentMonth === 1) year = currentYear - 1;
+        }
+
+        // FX Gain / Loss matching
+        if (/환차|환율|달러|usd|외환|환전|환손익|환차익|환차손/i.test(text)) {
+          metric = 'fx_gain_loss';
+          targetCurrency = 'USD';
+        } else if (/주말|토요일|일요일|weekend/i.test(text)) {
+          metric = 'weekend_expense';
+        } else if (/식비|카페|커피|외식|음식|배달|점심|저녁|마트|장보기/i.test(text)) {
+          metric = 'category_sum';
+          category = 'Food';
+        } else if (/교통|지하철|버스|택시|주유|주차/i.test(text)) {
+          metric = 'category_sum';
+          category = 'Transport';
+        } else if (/생활|쇼핑|다이소|쿠팡|올리브영|편의점/i.test(text)) {
+          metric = 'category_sum';
+          category = 'Living';
+        } else if (/고정비|월세|관리비|통신비|보험|공과금/i.test(text)) {
+          metric = 'category_sum';
+          category = 'Fixed';
+        } else if (/의료|병원|약국|헬스|운동/i.test(text)) {
+          metric = 'category_sum';
+          category = 'Health';
+        } else if (/여가|문화|영화|여행|숙박/i.test(text)) {
+          metric = 'category_sum';
+          category = 'Leisure';
+        } else if (/총\s*지출|얼마\s*썼|지출\s*총액/i.test(text)) {
+          metric = 'total_expense';
+        } else if (/수입|월급|급여|들어온\s*돈/i.test(text)) {
+          metric = 'total_income';
+        } else if (/저축|순수익|흑자|잉여/i.test(text)) {
+          metric = 'net_savings';
+        }
+
+        const dateRange = `${year}-${String(month).padStart(2, '0')}`;
+        return {
+          metric,
+          dateRange,
+          year,
+          month,
+          targetCurrency,
+          category,
+          merchantKeyword,
+          querySummary: `${month}월 ${metric === 'fx_gain_loss' ? '환차손익' : metric === 'weekend_expense' ? '주말 지출' : category || '재정'} 분석`
+        };
+      };
+
+      if (!apiKey || engineConfig?.engineType === 'local') {
+        const localParams = parseIntentLocally(query);
+        return res.json({ parameters: localParams, source: 'local' });
+      }
+
+      try {
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+        });
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: query,
+          config: {
+            systemInstruction: `You are an expert financial natural language query intent extractor.
+The user is asking a financial analytics question about their finances.
+Current reference date is ${today.toISOString().slice(0, 10)} (Year: ${currentYear}, Month: ${currentMonth}).
+
+Extract the structured parameters:
+- "metric": Strictly one of ["fx_gain_loss", "category_sum", "weekend_expense", "total_expense", "total_income", "net_savings", "merchant_expense", "general_financial"].
+  * "fx_gain_loss": FX exchange rate fluctuations, foreign exchange profits/losses, dollar gains/losses (e.g. 9월 달러 환차손익, 환차익, 외화 변동, 환율 이익).
+  * "category_sum": Spending on a specific category (e.g. 식비 분석, 식비 총합, 교통비, 생활비).
+  * "weekend_expense": Weekend spending analysis (e.g. 주말 지출, 주말 소비).
+  * "total_expense": Overall expense for a period.
+  * "total_income": Overall income for a period.
+  * "net_savings": Savings, surplus, or net balance for a period.
+  * "merchant_expense": Spending at a specific merchant/store (e.g. 스타벅스 지출).
+- "dateRange": "YYYY-MM" format (e.g. "2026-09"). If year not specified, default to ${currentYear}. If month not specified, default to ${currentMonth}.
+- "year": Integer year.
+- "month": Integer month (1-12).
+- "targetCurrency": "USD", "KRW", "EUR", "JPY", "GBP". Default "USD" if FX/dollar mentioned, otherwise "KRW".
+- "category": One of ["Food", "Living", "Transport", "Fixed", "Health", "Leisure"] if category_sum.
+- "merchantKeyword": Merchant name string if merchant_expense.
+- "querySummary": Short Korean title of the query (e.g. "9월 달러 환차손익 분석").`,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                metric: {
+                  type: Type.STRING,
+                  description: 'fx_gain_loss, category_sum, weekend_expense, total_expense, total_income, net_savings, merchant_expense, general_financial'
+                },
+                dateRange: { type: Type.STRING },
+                year: { type: Type.INTEGER },
+                month: { type: Type.INTEGER },
+                targetCurrency: { type: Type.STRING },
+                category: { type: Type.STRING },
+                merchantKeyword: { type: Type.STRING },
+                querySummary: { type: Type.STRING }
+              },
+              required: ['metric']
+            }
+          }
+        });
+
+        const jsonStr = response.text?.trim() || '{}';
+        const parsed = JSON.parse(jsonStr);
+        res.json({ parameters: parsed, source: 'gemini' });
+      } catch (geminiError: any) {
+        console.warn('Gemini query intent fallback to local:', geminiError.message);
+        const fallbackParams = parseIntentLocally(query);
+        res.json({ parameters: fallbackParams, source: 'fallback' });
+      }
+    } catch (err: any) {
+      console.error('Query intent error:', err);
+      res.status(500).json({ error: err.message || '질문 의도 분석 중 오류가 발생했습니다.' });
+    }
+  });
+
   // Support both /api/* and /vibevault/api/*
   app.use((req, res, next) => {
     if (req.url.startsWith('/vibevault/api/')) {

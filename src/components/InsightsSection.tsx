@@ -6,7 +6,8 @@ import {
   ChartPaletteType,
   AssetAccount,
   DebtItem,
-  AssetCategoryType
+  AssetCategoryType,
+  FinancialQueryResult
 } from '../types';
 import { 
   format, 
@@ -37,11 +38,14 @@ import {
   CreditCard,
   CheckCircle2,
   AlertTriangle,
-  ArrowRight
+  ArrowRight,
+  X,
+  Loader2
 } from 'lucide-react';
 import { 
   calculateCashflowForecast, 
-  detectSubscriptions 
+  detectSubscriptions,
+  executeFinancialQuery
 } from '../autonomousFinance';
 import { 
   getCurrencySymbol, 
@@ -103,6 +107,35 @@ export const InsightsSection: React.FC<InsightsSectionProps> = ({
   const [accounts, setAccounts] = useState<AssetAccount[]>([]);
   const [debts, setDebts] = useState<DebtItem[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
+
+  // Conversational Financial Query ("Ask AI Vault") State
+  const [naturalQuery, setNaturalQuery] = useState('');
+  const [isQuerying, setIsQuerying] = useState(false);
+  const [queryResult, setQueryResult] = useState<FinancialQueryResult | null>(null);
+  const [queryError, setQueryError] = useState<string | null>(null);
+
+  const handleRunQuery = async (queryText?: string) => {
+    const textToRun = (typeof queryText === 'string' ? queryText : naturalQuery).trim();
+    if (!textToRun || isQuerying) return;
+    setIsQuerying(true);
+    setQueryError(null);
+    try {
+      const res = await executeFinancialQuery(
+        textToRun,
+        transactions,
+        accounts,
+        fxRates,
+        currentCurrency
+      );
+      setQueryResult(res);
+      setNaturalQuery('');
+    } catch (err: any) {
+      console.error('Financial query error:', err);
+      setQueryError(err.message || '금융 질문을 분석하는 중 오류가 발생했습니다.');
+    } finally {
+      setIsQuerying(false);
+    }
+  };
 
   // Load Asset Accounts and Debts for integrated analysis
   const loadVaultData = async () => {
@@ -373,6 +406,218 @@ export const InsightsSection: React.FC<InsightsSectionProps> = ({
             통합 자산·장부 분석
           </span>
         </div>
+      </div>
+
+      {/* Ask AI Vault Conversational Query Bar & Briefing Card */}
+      <div className="space-y-3">
+        {/* Minimalist Glassmorphic Query Input Bar */}
+        <div className={`p-3.5 sm:p-4 rounded-xl border transition-all ${
+          isLight
+            ? 'bg-white/80 backdrop-blur-xl border-slate-200/80 shadow-[0_4px_20px_-2px_rgba(0,0,0,0.03)]'
+            : 'bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] shadow-[0_4px_20px_-2px_rgba(0,0,0,0.3)]'
+        }`}>
+          <div className="flex items-center gap-2.5">
+            <div className="shrink-0 p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400">
+              <Sparkles size={16} className={isQuerying ? 'animate-spin' : ''} />
+            </div>
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={naturalQuery}
+                onChange={(e) => setNaturalQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleRunQuery(naturalQuery);
+                  }
+                }}
+                disabled={isQuerying}
+                placeholder="✦ 무엇이든 물어보세요 (예: 9월 달러 환차손익, 식비 총합, 주말 지출)"
+                className={`w-full bg-transparent text-xs sm:text-sm font-light outline-none transition-all placeholder:text-slate-500 ${
+                  isLight ? 'text-slate-900 placeholder:text-slate-400' : 'text-slate-100 placeholder:text-slate-500'
+                }`}
+              />
+            </div>
+            {naturalQuery && (
+              <button
+                type="button"
+                onClick={() => setNaturalQuery('')}
+                className="p-1 text-slate-400 hover:text-slate-200 text-xs rounded-full"
+                aria-label="입력 지우기"
+              >
+                <X size={14} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => handleRunQuery(naturalQuery)}
+              disabled={isQuerying || !naturalQuery.trim()}
+              className={`p-2 rounded-xl transition-all flex items-center justify-center shrink-0 active:scale-95 ${
+                naturalQuery.trim() && !isQuerying
+                  ? isLight
+                    ? 'bg-slate-900 text-white hover:bg-slate-800'
+                    : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                  : isLight
+                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                    : 'bg-white/[0.04] text-slate-500 cursor-not-allowed'
+              }`}
+              aria-label="질문 실행"
+            >
+              {isQuerying ? (
+                <Loader2 size={15} className="animate-spin text-indigo-400" />
+              ) : (
+                <ArrowRight size={15} />
+              )}
+            </button>
+          </div>
+
+          {/* Quick Chip Suggestions */}
+          <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-white/[0.04] flex-wrap">
+            <span className={`text-[11px] font-light ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+              추천 질문:
+            </span>
+            <button
+              type="button"
+              onClick={() => handleRunQuery('9월 환차익')}
+              disabled={isQuerying}
+              className={`text-xs font-light px-2.5 py-1 rounded-full transition-all active:scale-95 border ${
+                isLight 
+                  ? 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700' 
+                  : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.06] text-slate-300 hover:text-white'
+              }`}
+            >
+              9월 환차익
+            </button>
+            <button
+              type="button"
+              onClick={() => handleRunQuery('식비 분석')}
+              disabled={isQuerying}
+              className={`text-xs font-light px-2.5 py-1 rounded-full transition-all active:scale-95 border ${
+                isLight 
+                  ? 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700' 
+                  : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.06] text-slate-300 hover:text-white'
+              }`}
+            >
+              식비 분석
+            </button>
+            <button
+              type="button"
+              onClick={() => handleRunQuery('주말 지출')}
+              disabled={isQuerying}
+              className={`text-xs font-light px-2.5 py-1 rounded-full transition-all active:scale-95 border ${
+                isLight 
+                  ? 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700' 
+                  : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.06] text-slate-300 hover:text-white'
+              }`}
+            >
+              주말 지출
+            </button>
+          </div>
+        </div>
+
+        {/* Query Loading State */}
+        {isQuerying && (
+          <div className={`p-4 rounded-xl border flex items-center justify-center gap-3 animate-pulse ${
+            isLight ? 'bg-white/80 border-slate-200/80 text-slate-600' : 'bg-white/[0.02] border-white/[0.06] text-slate-300'
+          }`}>
+            <Loader2 size={16} className="animate-spin text-indigo-400" />
+            <span className="text-xs font-light">
+              로컬 장부 및 자산 데이터를 결정론적 수식으로 분석 중입니다...
+            </span>
+          </div>
+        )}
+
+        {/* Error State */}
+        {queryError && (
+          <div className="p-3.5 rounded-xl border border-rose-500/20 bg-rose-500/10 text-rose-300 text-xs flex items-center justify-between">
+            <span>{queryError}</span>
+            <button type="button" onClick={() => setQueryError(null)} className="p-1 hover:text-white">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
+        {/* 3. Dismissible AI Briefing Card */}
+        {queryResult && !isQuerying && (
+          <div className={`p-5 sm:p-6 rounded-2xl border transition-all animate-in fade-in slide-in-from-top-2 duration-200 ${
+            isLight
+              ? 'bg-white/90 backdrop-blur-xl border-slate-200/80 text-slate-900 shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)]'
+              : 'bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] text-white shadow-[0_4px_20px_-2px_rgba(0,0,0,0.5)]'
+          }`}>
+            {/* Card Header with Question Tag & Dismiss Button */}
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-normal border border-indigo-500/20 bg-indigo-500/10 text-indigo-300">
+                  <Sparkles size={12} className="text-indigo-400" />
+                  <span>AI Vault 브리핑</span>
+                </span>
+                <span className={`text-xs font-light truncate max-w-[200px] sm:max-w-xs ${
+                  isLight ? 'text-slate-500' : 'text-slate-400'
+                }`}>
+                  "{queryResult.query}"
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQueryResult(null)}
+                className={`p-1.5 rounded-full transition-all active:scale-95 ${
+                  isLight ? 'hover:bg-slate-100 text-slate-500' : 'hover:bg-white/[0.08] text-slate-400 hover:text-white'
+                }`}
+                aria-label="브리핑 닫기"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Direct Answer */}
+            <h4 className={`text-base sm:text-lg font-normal tracking-tight ${
+              isLight ? 'text-slate-900' : 'text-white'
+            }`}>
+              {queryResult.directAnswer}
+            </h4>
+
+            {/* Two-Sentence Synthesis Explanation */}
+            <p className={`mt-2 text-xs sm:text-sm font-light leading-relaxed ${
+              isLight ? 'text-slate-600' : 'text-slate-300'
+            }`}>
+              {queryResult.summarySentence}
+            </p>
+
+            {/* Calculation Breakdown Pills */}
+            {queryResult.breakdownPills && queryResult.breakdownPills.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-4 pt-3.5 border-t border-white/[0.04]">
+                {queryResult.breakdownPills.map((pill, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-3 rounded-xl border flex flex-col justify-between ${
+                      pill.highlight
+                        ? isLight
+                          ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
+                          : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                        : isLight
+                          ? 'bg-slate-50 border-slate-200/60 text-slate-800'
+                          : 'bg-white/[0.02] border-white/[0.04] text-slate-200'
+                    }`}
+                  >
+                    <span className={`text-[11px] font-light ${
+                      pill.highlight 
+                        ? (isLight ? 'text-emerald-700' : 'text-emerald-400') 
+                        : (isLight ? 'text-slate-500' : 'text-slate-400')
+                    }`}>
+                      {pill.label}
+                    </span>
+                    <span className={`text-xs sm:text-sm font-normal tabular-nums mt-1 ${
+                      pill.highlight
+                        ? (isLight ? 'text-emerald-900 font-medium' : 'text-emerald-200')
+                        : (isLight ? 'text-slate-900' : 'text-slate-100')
+                    }`}>
+                      {pill.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 2. Primary Sub-tab Segment Control: Clean, Pill-shaped with gentle active outlines */}
