@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { Transaction } from '../types';
 import { format, parseISO } from 'date-fns';
-import { getCategoryKo, getCurrencySymbol, formatCurrency } from '../utils';
+import { getCategoryKo, getCurrencySymbol, formatCurrency, getPaymentMethodKo } from '../utils';
 
 interface TransactionActionModalProps {
   transaction: Transaction | null;
@@ -160,14 +160,14 @@ export const TransactionActionModal: React.FC<TransactionActionModalProps> = ({
               </span>
             </div>
 
-            {transaction.paymentMethod && (
+            {(transaction.paymentMethod || transaction.type === 'INCOME') && (
               <div className="flex items-center justify-between">
                 <span className={`flex items-center gap-1.5 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
                   <CreditCard size={12} />
-                  <span>결제 수단</span>
+                  <span>{transaction.type === 'INCOME' ? '입금 계좌/수단' : '결제 수단'}</span>
                 </span>
                 <span className={`font-medium ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
-                  {transaction.paymentMethod}
+                  {getPaymentMethodKo(transaction.paymentMethod, transaction.type)}
                 </span>
               </div>
             )}

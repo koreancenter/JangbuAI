@@ -120,7 +120,7 @@ export function getUserPreferences(): UserPreferences {
           ? parsed.chartPalette 
           : 'default',
         autoCategorization: parsed.autoCategorization !== undefined ? !!parsed.autoCategorization : true,
-        defaultLaunchScreen: (parsed.defaultLaunchScreen === 'ledger' ? 'ledger' : 'vault'),
+        defaultLaunchScreen: (['vault', 'insights', 'ledger'] as const).includes(parsed.defaultLaunchScreen) ? parsed.defaultLaunchScreen : 'vault',
       };
     }
   } catch (e) {}
@@ -201,7 +201,8 @@ export const SUBCATEGORY_NAMES_KO: Record<string, string> = {
   Vehicle: '차량/주유',
   // Fixed
   Salary: '급여',
-  Subscription: '구독서비스',
+  Subscription: '구독',
+  Subscriptions: '구독',
   Utilities: '공과금/관리비',
   Finance: '금융/보험',
   Savings: '적금/저축',
@@ -265,6 +266,41 @@ export const TRANSACTION_TYPE_KO: Record<string, string> = {
 
 export function getTransactionTypeKo(type: string): string {
   return TRANSACTION_TYPE_KO[type] || type;
+}
+
+export function getPaymentMethodKo(method?: string, transactionType?: string): string {
+  if (!method) {
+    return transactionType === 'INCOME' ? '통장' : '';
+  }
+  const trimmed = method.trim();
+  // Income payment methods should always reflect account/bank (통장/계좌), never card
+  if (transactionType === 'INCOME') {
+    if (/^(?:card|카드|check\s*card|체크카드|신용카드|credit\s*card)$/i.test(trimmed)) {
+      return '통장';
+    }
+    if (/^(?:계좌이체|계좌|통장|bank\s*transfer|무통장)$/i.test(trimmed)) {
+      return '통장';
+    }
+  }
+
+  // Payment method translations
+  if (/^(?:card|신용카드|카드결제)$/i.test(trimmed)) {
+    return '카드';
+  }
+  if (/^check\s*card$/i.test(trimmed)) {
+    return '체크카드';
+  }
+  if (/^credit\s*card$/i.test(trimmed)) {
+    return '신용카드';
+  }
+  if (/^bank\s*transfer$/i.test(trimmed)) {
+    return '계좌이체';
+  }
+  if (/^cash$/i.test(trimmed)) {
+    return '현금';
+  }
+
+  return trimmed;
 }
 
 export const DEFAULT_USER_ASSETS: Asset[] = [

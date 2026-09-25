@@ -41,6 +41,7 @@ import { cleanMerchantTitle } from './merchantSanitizer';
 import { 
   getAIEngineConfig, 
   getCategoryKo, 
+  getPaymentMethodKo,
   DEFAULT_FX_RATES,
   getCurrencySymbol,
   SUPPORTED_CURRENCIES
@@ -57,14 +58,13 @@ import { useAutonomousEngine } from './hooks/useAutonomousEngine';
 import { EditTransactionModal } from './components/EditTransactionModal';
 import { TransactionActionModal } from './components/TransactionActionModal';
 import { SettingsModal } from './components/SettingsModal';
-import { AnalyticsSection } from './components/AnalyticsSection';
+import { InsightsSection } from './components/InsightsSection';
 import { ManualCategoryModal } from './components/ManualCategoryModal';
 import { FinancialSummaryCard } from './components/FinancialSummaryCard';
 import { ConsolidatedSpendingCard } from './components/ConsolidatedSpendingCard';
 import { CurrencySelectorModal } from './components/CurrencySelectorModal';
 import { ReceiptScannerModal } from './components/ReceiptScannerModal';
 import { SubscriptionManagerSection } from './components/SubscriptionManagerSection';
-import { PredictiveCashflowSection } from './components/PredictiveCashflowSection';
 import { PWAInstallButton, PWAInstallBanner } from './components/PWAInstallButton';
 import { VaultOverviewSection } from './components/VaultOverviewSection';
 import { VaultLockScreen } from './components/VaultLockScreen';
@@ -128,7 +128,6 @@ export function App() {
     setSelectedCategory,
     ledgerFilter,
     setLedgerFilter,
-    filteredStreamTransactions,
     filteredLedgerTransactions,
     loadTransactions,
     add: addTx,
@@ -208,7 +207,7 @@ export function App() {
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInputFocused, setIsInputFocused] = useState(false);
-  const [activeView, setActiveView] = useState<'stream' | 'ledger' | 'subscriptions' | 'runway'>('stream');
+  const [activeView, setActiveView] = useState<'ledger' | 'insights' | 'subscriptions'>('ledger');
   const [mainMode, setMainMode] = useState<LaunchScreenMode>('vault');
 
   // Sync default launch screen preference on mount/change
@@ -229,6 +228,7 @@ export function App() {
   // Modal Visibility States
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'assets' | 'engine' | 'preferences' | 'privacy'>('assets');
+  const [settingsInitialSubTab, setSettingsInitialSubTab] = useState<'assets' | 'budget' | 'subscriptions'>('assets');
   const [isCurrencyModalOpen, setIsCurrencyModalOpen] = useState(false);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -242,6 +242,51 @@ export function App() {
 
   const recognitionRef = useRef<any>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Mobile Touch Swipe Handling for Ledger Filters (전체, 지출, 수입, 이체, 정산)
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const LEDGER_FILTERS: LedgerFilterType[] = useMemo(() => ['ALL', 'EXPENSE', 'INCOME', 'TRANSFER', 'SETTLEMENT'], []);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      touchStartPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (!touchStartPos.current || e.changedTouches.length === 0) return;
+    const startX = touchStartPos.current.x;
+    const startY = touchStartPos.current.y;
+    const endX = e.changedTouches[0].clientX;
+    const endY = e.changedTouches[0].clientY;
+    touchStartPos.current = null;
+
+    const diffX = endX - startX;
+    const diffY = endY - startY;
+
+    // Only trigger if horizontal swipe is dominant and exceeds threshold (45px)
+    if (Math.abs(diffX) > 45 && Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+      if (diffX < 0) {
+        // Swiped Left -> Next filter
+        setLedgerFilter((curr) => {
+          const idx = LEDGER_FILTERS.indexOf(curr);
+          if (idx >= 0 && idx < LEDGER_FILTERS.length - 1) {
+            return LEDGER_FILTERS[idx + 1];
+          }
+          return curr;
+        });
+      } else {
+        // Swiped Right -> Previous filter
+        setLedgerFilter((curr) => {
+          const idx = LEDGER_FILTERS.indexOf(curr);
+          if (idx > 0) {
+            return LEDGER_FILTERS[idx - 1];
+          }
+          return curr;
+        });
+      }
+    }
+  }, [LEDGER_FILTERS, setLedgerFilter]);
 
   // ---------------------------------------------------------------------------
   // 6. Memoized Action Callbacks (Prevents Unnecessary Child Re-renders)
@@ -261,13 +306,17 @@ export function App() {
   const handleOpenReceiptModal = useCallback(() => setIsReceiptModalOpen(true), []);
   const handleCloseReceiptModal = useCallback(() => setIsReceiptModalOpen(false), []);
 
-  const handleOpenSettingsModal = useCallback((tab?: unknown) => {
+  const handleOpenSettingsModal = useCallback((
+    tab?: unknown,
+    subTab?: 'assets' | 'budget' | 'subscriptions'
+  ) => {
     const validTabs: ('assets' | 'engine' | 'preferences' | 'privacy')[] = ['assets', 'engine', 'preferences', 'privacy'];
     const resolvedTab: 'assets' | 'engine' | 'preferences' | 'privacy' =
       typeof tab === 'string' && (validTabs as string[]).includes(tab)
         ? (tab as 'assets' | 'engine' | 'preferences' | 'privacy')
         : 'assets';
     setSettingsInitialTab(resolvedTab);
+    setSettingsInitialSubTab(subTab || 'assets');
     setIsSettingsOpen(true);
   }, []);
   const handleCloseSettingsModal = useCallback(() => {
@@ -503,7 +552,7 @@ export function App() {
           subCategory: subCategory || (type === 'INCOME' ? 'Salary' : 'General'),
           description: desc,
           date: t.date ? new Date(t.date).toISOString() : new Date().toISOString(),
-          paymentMethod: t.paymentMethod || (type === 'INCOME' ? '계좌이체' : 'Card'),
+          paymentMethod: t.paymentMethod || (type === 'INCOME' ? '통장' : '카드'),
           groupId: t.groupId,
           originalTotal: t.originalTotal ? Math.abs(Number(t.originalTotal)) : undefined,
           isInternalTransfer: Boolean(t.isInternalTransfer)
@@ -582,7 +631,9 @@ export function App() {
         <div className="flex items-center min-w-0">
           <div className="flex flex-col truncate">
             <div className="flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${mainMode === 'vault' ? 'bg-blue-500' : 'bg-emerald-400'} animate-pulse`} />
+              <span className={`w-2 h-2 rounded-full ${
+                mainMode === 'vault' ? 'bg-blue-500' : mainMode === 'insights' ? 'bg-indigo-400' : 'bg-emerald-400'
+              } animate-pulse`} />
               <h1 className={`text-base font-extrabold tracking-tight truncate ${
                 isLight ? 'text-slate-950' : 'text-white'
               }`}>
@@ -592,7 +643,11 @@ export function App() {
             <span className={`text-xs font-medium truncate ${
               isLight ? 'text-slate-500' : 'text-[#94A3B8]'
             }`}>
-              {mainMode === 'vault' ? '프라이빗 자산 금고 & 포트폴리오' : `${format(now, 'yyyy년 M월')} 일일 장부`}
+              {mainMode === 'vault' 
+                ? '프라이빗 자산 금고 & 포트폴리오' 
+                : mainMode === 'insights' 
+                ? '통합 자산 & 소비 인사이트' 
+                : `${format(now, 'yyyy년 M월')} 일일 장부`}
             </span>
           </div>
         </div>
@@ -691,6 +746,19 @@ export function App() {
             theme={userPrefs.theme || 'dark'}
             onTransactionAdded={() => loadTransactions()}
           />
+        ) : mainMode === 'insights' ? (
+          /* PRIMARY INTEGRATED INSIGHTS MODE: Assets & Ledger Unified Insights */
+          <InsightsSection
+            transactions={transactions}
+            currentCurrency={currentCurrency}
+            fxRates={fxRates}
+            isStealth={isStealth}
+            theme={userPrefs.theme || 'dark'}
+            chartPalette={userPrefs.chartPalette || 'default'}
+            onOpenThemeSettings={() => handleOpenSettingsModal('preferences')}
+            onNavigateToVault={() => setMainMode('vault')}
+            onNavigateToLedger={() => setMainMode('ledger')}
+          />
         ) : (
           /* PRIMARY LEDGER MODE: Daily Transaction & Budget Tracking */
           <>
@@ -706,114 +774,51 @@ export function App() {
               theme={userPrefs.theme || 'dark'}
             />
 
-        {/* Navigation Switcher: Streamlined Segmented Control */}
-        <div className="flex items-center justify-between gap-2 px-0.5 py-1">
-          <div className={`flex items-center p-1 rounded-2xl overflow-x-auto scrollbar-none flex-1 max-w-full ${
-            isLight ? 'bg-slate-100' : 'bg-white/[0.04]'
-          }`}>
-            <button
-              id="switcher-stream-btn"
-              type="button"
-              onClick={() => setActiveView('stream')}
-              className={`flex-1 min-w-[70px] py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5 ${
-                activeView === 'stream'
-                  ? isLight
-                    ? 'bg-white text-slate-950 shadow-xs'
-                    : 'bg-white/15 text-white shadow-xs'
-                  : isLight 
-                    ? 'text-slate-600 hover:text-slate-950' 
-                    : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              타임라인
-            </button>
-            <button
-              id="switcher-ledger-btn"
-              type="button"
-              onClick={() => setActiveView('ledger')}
-              className={`flex-1 min-w-[70px] py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5 ${
-                activeView === 'ledger'
-                  ? isLight
-                    ? 'bg-white text-slate-950 shadow-xs'
-                    : 'bg-white/15 text-white shadow-xs'
-                  : isLight 
-                    ? 'text-slate-600 hover:text-slate-950' 
-                    : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              상세 내역
-            </button>
-            <button
-              id="switcher-subscriptions-btn"
-              type="button"
-              onClick={() => setActiveView('subscriptions')}
-              className={`flex-1 min-w-[75px] py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5 ${
-                activeView === 'subscriptions'
-                  ? isLight
-                    ? 'bg-white text-slate-950 shadow-xs'
-                    : 'bg-white/15 text-white shadow-xs'
-                  : isLight 
-                    ? 'text-slate-600 hover:text-slate-950' 
-                    : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <span>고정 구독</span>
-              {detectedSubsCount > 0 && (
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                  activeView === 'subscriptions'
-                    ? isLight ? 'bg-slate-100 text-slate-900' : 'bg-white/20 text-white'
-                    : isLight ? 'bg-emerald-100 text-emerald-800' : 'bg-[#00F5A0]/20 text-[#00F5A0]'
-                }`}>
-                  {detectedSubsCount}
-                </span>
-              )}
-            </button>
-            <button
-              id="switcher-runway-btn"
-              type="button"
-              onClick={() => setActiveView('runway')}
-              className={`flex-1 min-w-[70px] py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5 ${
-                activeView === 'runway'
-                  ? isLight
-                    ? 'bg-white text-slate-950 shadow-xs'
-                    : 'bg-white/15 text-white shadow-xs'
-                  : isLight 
-                    ? 'text-slate-600 hover:text-slate-950' 
-                    : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              현금흐름
-            </button>
+        {/* Ledger Header & Quick Fixed Subscriptions Settings Link */}
+        <div className="flex items-center justify-between gap-2 px-1 py-1">
+          <div className="flex items-center gap-2">
+            <span className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+              장부 거래 내역
+            </span>
+            <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${
+              isLight ? 'bg-slate-200/70 text-slate-700' : 'bg-white/10 text-slate-300'
+            }`}>
+              {transactionCount}건
+            </span>
           </div>
 
-          <span className={`hidden sm:inline-block text-xs font-medium whitespace-nowrap px-1 shrink-0 ${
-            isLight ? 'text-slate-400' : 'text-[#94A3B8]/80'
-          }`}>
-            총 {transactionCount}건
-          </span>
+          <button
+            type="button"
+            id="manage-subscriptions-link-btn"
+            onClick={() => handleOpenSettingsModal('assets', 'subscriptions')}
+            className={`text-xs font-semibold flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all active:scale-95 ${
+              isLight
+                ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/70'
+                : 'bg-white/[0.05] hover:bg-white/10 text-slate-300 border border-white/10'
+            }`}
+          >
+            <span>고정 구독 관리</span>
+            {detectedSubsCount > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                isLight ? 'bg-emerald-100 text-emerald-800' : 'bg-[#00F5A0]/20 text-[#00F5A0]'
+              }`}>
+                {detectedSubsCount}
+              </span>
+            )}
+          </button>
         </div>
 
-        {/* Embedded Spending Analytics (Donut & Trends) */}
-        {(activeView === 'stream' || activeView === 'ledger') && (
-          <AnalyticsSection
-            transactions={transactions}
-            selectedCategory={selectedCategory}
-            onSelectCategory={setSelectedCategory}
-            currencySymbol={currentCurrency}
-            isStealth={isStealth}
-            theme={userPrefs.theme || 'dark'}
-            chartPalette={userPrefs.chartPalette || 'default'}
-            onOpenThemeSettings={() => handleOpenSettingsModal('preferences')}
-          />
-        )}
-
-        {/* VIEW A: STREAM FEED */}
-        {activeView === 'stream' && (
-          <div className="space-y-3 pb-2 animate-in fade-in duration-200">
-            {/* Category Filter Status Pill */}
+        {/* VIEW: UNIFIED LEDGER WITH MOBILE SWIPE */}
+        {activeView === 'ledger' && (
+          <div 
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            className="space-y-3 pb-2 animate-in fade-in duration-200 select-none touch-pan-y"
+          >
+            {/* Category Filter Status Pill (if filtered by category from pie chart or insights) */}
             {selectedCategory && (
               <div className="flex items-center justify-between px-2 text-xs text-[#94A3B8]">
-                <span>필터링 중: <strong className="text-[#00F5A0] font-semibold">{getCategoryKo(selectedCategory)}</strong></span>
+                <span>카테고리 필터링: <strong className="text-[#00F5A0] font-semibold">{getCategoryKo(selectedCategory)}</strong></span>
                 <button
                   type="button"
                   onClick={() => setSelectedCategory(null)}
@@ -824,153 +829,6 @@ export function App() {
               </div>
             )}
 
-            {/* Empty State */}
-            {transactions.length === 0 ? (
-              <div className="py-8 px-4 text-center space-y-4">
-                <div>
-                  <h3 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>장부 준비 완료</h3>
-                  <p className={`text-xs mt-1 ${isLight ? 'text-slate-500' : 'text-[#94A3B8]'}`}>
-                    아래 입력창에 평소 대화하듯 자유롭게 입력해 보세요.
-                  </p>
-                </div>
-                
-                {/* Example prompts */}
-                <div className="pt-2 text-left space-y-1">
-                  <span className={`text-xs font-medium block px-1 pb-0.5 ${isLight ? 'text-slate-600' : 'text-[#94A3B8]'}`}>
-                    추천 입력 예시 (터치하여 실행):
-                  </span>
-                  <div className="space-y-0.5">
-                    {EXAMPLE_PROMPTS.map((prompt, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => handleProcessInput(prompt.text)}
-                        className={`w-full text-left text-xs py-2 px-2 rounded-lg transition-colors flex items-center justify-between group ${
-                          isLight 
-                            ? 'hover:bg-slate-100 text-slate-800' 
-                            : 'hover:bg-white/[0.04] text-slate-200'
-                        }`}
-                      >
-                        <div className="truncate pr-2">
-                          <span className={`font-bold mr-1.5 ${isLight ? 'text-emerald-700' : 'text-[#00F5A0]'}`}>
-                            [{prompt.category}]
-                          </span>
-                          <span className={isLight ? 'text-slate-900' : 'text-white'}>{prompt.text}</span>
-                        </div>
-                        <ChevronRight size={13} className={`shrink-0 opacity-40 group-hover:opacity-100 transition-opacity ${isLight ? 'text-slate-400 group-hover:text-emerald-600' : 'text-[#94A3B8] group-hover:text-[#00F5A0]'}`} />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ) : filteredStreamTransactions.length === 0 ? (
-              <div className="py-10 px-4 text-center space-y-3">
-                <p className={`text-xs ${isLight ? 'text-slate-600' : 'text-[#94A3B8]'}`}>
-                  선택한 <strong className={isLight ? 'text-slate-900' : 'text-white'}>[{selectedCategory ? getCategoryKo(selectedCategory) : ''}]</strong> 카테고리 내역이 없습니다.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setSelectedCategory(null)}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-                    isLight 
-                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-800' 
-                      : 'bg-white/[0.06] hover:bg-white/10 text-white'
-                  }`}
-                >
-                  전체 내역 보기
-                </button>
-              </div>
-            ) : (
-              /* Transaction Feed List */
-              <div className="divide-y divide-white/5">
-                {filteredStreamTransactions.map((t) => {
-                  const isExpense = t.type === 'EXPENSE';
-                  const isIncome = t.type === 'INCOME';
-                  const isSettlement = t.type === 'SETTLEMENT';
-                  const displayTitle = formatTransactionTitle(t.description);
-                  const categoryLabel = t.isInternalTransfer
-                    ? (t.subCategory || '내부이체/원금상환')
-                    : getCategoryKo(t.category, t.subCategory);
-
-                  return (
-                    <div 
-                      key={t.id}
-                      onClick={() => setSelectedActionTransaction(t)}
-                      className={`py-3 px-1 transition-colors cursor-pointer group select-none ${
-                        isLight 
-                          ? 'hover:bg-slate-100/70 active:bg-slate-200/50' 
-                          : 'hover:bg-white/[0.03] active:bg-white/[0.06]'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        {/* Left: Merchant Title & Clean Metadata */}
-                        <div className="flex flex-col min-w-0 flex-1">
-                          <span className={`text-sm font-medium leading-snug truncate ${
-                            isLight ? 'text-slate-900' : 'text-slate-100'
-                          }`}>
-                            {displayTitle}
-                          </span>
-                          
-                          <div className={`flex items-center gap-1.5 text-xs font-normal mt-0.5 flex-wrap ${
-                            isLight ? 'text-slate-500' : 'text-slate-400'
-                          }`}>
-                            <span>{categoryLabel}</span>
-                            {t.paymentMethod && (
-                              <>
-                                <span className="opacity-40">·</span>
-                                <span>{t.paymentMethod}</span>
-                              </>
-                            )}
-                            <span className="opacity-40">·</span>
-                            <span>{format(parseISO(t.date), 'M.d HH:mm')}</span>
-                          </div>
-                        </div>
-
-                        {/* Right: Amount */}
-                        <div className="flex flex-col items-end shrink-0 pl-2">
-                          <span className={`text-sm font-semibold tracking-tight transition-all ${isStealth ? 'blur-sm select-none' : ''} ${
-                            isExpense 
-                              ? isLight ? 'text-slate-950' : 'text-slate-100'
-                              : isIncome || isSettlement 
-                                ? isLight ? 'text-emerald-700' : 'text-[#00F5A0]' 
-                                : isLight ? 'text-blue-600' : 'text-blue-400'
-                          }`}>
-                            {isExpense ? '-' : '+'}{getCurrencySymbol(t.currency || 'KRW')}{t.amount.toLocaleString()}
-                          </span>
-
-                          {/* Converted amount if currency differs */}
-                          {(t.currency || 'KRW') !== currentCurrency && (
-                            <span className={`text-[11px] font-normal mt-0.5 ${isLight ? 'text-slate-400' : 'text-slate-500'} ${isStealth ? 'blur-xs select-none' : ''}`}>
-                              ≈ {isExpense ? '-' : '+'}{currSymbol}{Math.round(getAmountInSelectedCurrency(t)).toLocaleString()}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Dutch-Pay Settlement Pill */}
-                      {isSettlement && (
-                        <div className={`mt-2 px-2.5 py-1 rounded-xl text-xs flex items-center justify-between font-medium ${
-                          isLight 
-                            ? 'bg-emerald-50 text-emerald-800' 
-                            : 'bg-[#00F5A0]/10 text-[#00F5A0]'
-                        }`}>
-                          <span className="flex items-center gap-1.5">
-                            <ArrowLeftRight size={13} /> 더치페이 정산 완료
-                          </span>
-                          <span>+{currSymbol}{t.amount.toLocaleString()} 입금</span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* VIEW B: STANDARD LEDGER */}
-        {activeView === 'ledger' && (
-          <div className="space-y-3 pb-2 animate-in fade-in duration-200">
             {/* Filter Pills & CSV Export */}
             <div className="flex items-center justify-between gap-2 pt-0.5">
               <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5">
@@ -1009,17 +867,82 @@ export function App() {
               </button>
             </div>
 
-            {/* Ledger List */}
-            {filteredLedgerTransactions.length === 0 ? (
-              <div className={`py-12 text-center text-xs ${
+            {/* Mobile swipe hint text */}
+            <div className="sm:hidden flex items-center justify-between px-1 text-[11px] text-slate-400/80">
+              <span>좌우로 스와이프하여 유형 변경</span>
+              <span className="font-mono text-[10px] opacity-70">
+                {ledgerFilter === 'ALL' ? '1/5 전체' : ledgerFilter === 'EXPENSE' ? '2/5 지출' : ledgerFilter === 'INCOME' ? '3/5 수입' : ledgerFilter === 'TRANSFER' ? '4/5 이체' : '5/5 정산'}
+              </span>
+            </div>
+
+            {/* Empty State / Recommended Prompts */}
+            {transactions.length === 0 ? (
+              <div className="py-8 px-4 text-center space-y-4">
+                <div>
+                  <h3 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>장부 준비 완료</h3>
+                  <p className={`text-xs mt-1 ${isLight ? 'text-slate-500' : 'text-[#94A3B8]'}`}>
+                    아래 입력창에 평소 대화하듯 자유롭게 입력해 보세요.
+                  </p>
+                </div>
+                
+                {/* Example prompts */}
+                <div className="pt-2 text-left space-y-1">
+                  <span className={`text-xs font-medium block px-1 pb-0.5 ${isLight ? 'text-slate-600' : 'text-[#94A3B8]'}`}>
+                    추천 입력 예시 (터치하여 실행):
+                  </span>
+                  <div className="space-y-0.5">
+                    {EXAMPLE_PROMPTS.map((prompt, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleProcessInput(prompt.text)}
+                        className={`w-full text-left text-xs py-2 px-2 rounded-lg transition-colors flex items-center justify-between group ${
+                          isLight 
+                            ? 'hover:bg-slate-100 text-slate-800' 
+                            : 'hover:bg-white/[0.04] text-slate-200'
+                        }`}
+                      >
+                        <div className="truncate pr-2">
+                          <span className={`font-bold mr-1.5 ${isLight ? 'text-emerald-700' : 'text-[#00F5A0]'}`}>
+                            [{prompt.category}]
+                          </span>
+                          <span className={isLight ? 'text-slate-900' : 'text-white'}>{prompt.text}</span>
+                        </div>
+                        <ChevronRight size={13} className={`shrink-0 opacity-40 group-hover:opacity-100 transition-opacity ${isLight ? 'text-slate-400 group-hover:text-emerald-600' : 'text-[#94A3B8] group-hover:text-[#00F5A0]'}`} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : filteredLedgerTransactions.length === 0 ? (
+              <div className={`py-12 text-center text-xs space-y-2 ${
                 isLight ? 'text-slate-500' : 'text-[#94A3B8]'
               }`}>
-                해당 조건의 장부 내역이 없습니다.
+                <p>
+                  선택한 <strong className={isLight ? 'text-slate-900' : 'text-white'}>
+                    [{ledgerFilter === 'ALL' ? '전체' : ledgerFilter === 'EXPENSE' ? '지출' : ledgerFilter === 'INCOME' ? '수입' : ledgerFilter === 'TRANSFER' ? '이체' : '정산'}]
+                  </strong> 조건의 내역이 없습니다.
+                </p>
+                {ledgerFilter !== 'ALL' && (
+                  <button
+                    type="button"
+                    onClick={() => setLedgerFilter('ALL')}
+                    className={`mt-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                      isLight 
+                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-800' 
+                        : 'bg-white/[0.06] hover:bg-white/10 text-white'
+                    }`}
+                  >
+                    전체 내역 보기
+                  </button>
+                )}
               </div>
             ) : (
               <div className="divide-y divide-white/5">
                 {filteredLedgerTransactions.map((t) => {
                   const isExpense = t.type === 'EXPENSE';
+                  const isIncome = t.type === 'INCOME';
+                  const isSettlement = t.type === 'SETTLEMENT';
                   const displayTitle = formatTransactionTitle(t.description);
                   const categoryLabel = t.isInternalTransfer
                     ? (t.subCategory || '내부이체/원금상환')
@@ -1048,14 +971,14 @@ export function App() {
                             isLight ? 'text-slate-500' : 'text-slate-400'
                           }`}>
                             <span>{categoryLabel}</span>
-                            {t.paymentMethod && (
+                            {(t.paymentMethod || t.type === 'INCOME') && (
                               <>
                                 <span className="opacity-40">·</span>
-                                <span>{t.paymentMethod}</span>
+                                <span>{getPaymentMethodKo(t.paymentMethod, t.type)}</span>
                               </>
                             )}
                             <span className="opacity-40">·</span>
-                            <span>{format(parseISO(t.date), 'M.d')}</span>
+                            <span>{format(parseISO(t.date), 'M.d HH:mm')}</span>
                           </div>
                         </div>
 
@@ -1066,7 +989,9 @@ export function App() {
                               ? isLight ? 'text-blue-600' : 'text-blue-400'
                               : isExpense 
                                 ? isLight ? 'text-slate-950' : 'text-slate-100' 
-                                : isLight ? 'text-emerald-700' : 'text-[#00F5A0]'
+                                : isIncome || isSettlement
+                                  ? isLight ? 'text-emerald-700' : 'text-[#00F5A0]'
+                                  : isLight ? 'text-blue-600' : 'text-blue-400'
                           }`}>
                             {t.isInternalTransfer ? '⇄ ' : (isExpense ? '-' : '+')}{getCurrencySymbol(t.currency || 'KRW')}{t.amount.toLocaleString()}
                           </span>
@@ -1077,11 +1002,42 @@ export function App() {
                           )}
                         </div>
                       </div>
+
+                      {/* Dutch-Pay Settlement Pill */}
+                      {isSettlement && (
+                        <div className={`mt-2 px-2.5 py-1 rounded-xl text-xs flex items-center justify-between font-medium ${
+                          isLight 
+                            ? 'bg-emerald-50 text-emerald-800' 
+                            : 'bg-[#00F5A0]/10 text-[#00F5A0]'
+                        }`}>
+                          <span className="flex items-center gap-1.5">
+                            <ArrowLeftRight size={13} /> 더치페이 정산 완료
+                          </span>
+                          <span>+{currSymbol}{t.amount.toLocaleString()} 입금</span>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* VIEW INSIGHTS: DEDICATED ANALYTICS, CASHFLOW & CFO ADVICE */}
+        {activeView === 'insights' && (
+          <div className="animate-in fade-in duration-200">
+            <InsightsSection
+              transactions={transactions}
+              currentCurrency={currentCurrency}
+              fxRates={fxRates}
+              isStealth={isStealth}
+              theme={userPrefs.theme || 'dark'}
+              chartPalette={userPrefs.chartPalette || 'default'}
+              onOpenThemeSettings={() => handleOpenSettingsModal('preferences')}
+              onNavigateToVault={() => setMainMode('vault')}
+              onNavigateToLedger={() => setMainMode('ledger')}
+            />
           </div>
         )}
 
@@ -1095,19 +1051,6 @@ export function App() {
               isStealth={isStealth}
               theme={userPrefs.theme || 'dark'}
               onTransactionChange={loadTransactions}
-            />
-          </div>
-        )}
-
-        {/* VIEW D: PREDICTIVE CASHFLOW & RUNWAY */}
-        {activeView === 'runway' && (
-          <div className="animate-in fade-in duration-200">
-            <PredictiveCashflowSection
-              transactions={transactions}
-              currentCurrency={currentCurrency}
-              fxRates={fxRates}
-              isStealth={isStealth}
-              theme={userPrefs.theme || 'dark'}
             />
           </div>
         )}
@@ -1349,7 +1292,7 @@ export function App() {
             id="bottom-nav-vault-btn"
             type="button"
             onClick={() => setMainMode('vault')}
-            className={`flex-1 py-0.5 flex flex-col items-center gap-0.5 rounded-xl transition-all ${
+            className={`flex-1 py-1 flex flex-col items-center gap-0.5 rounded-xl transition-all ${
               mainMode === 'vault'
                 ? isLight
                   ? 'text-blue-600 font-bold'
@@ -1364,10 +1307,28 @@ export function App() {
           </button>
 
           <button
+            id="bottom-nav-insights-btn"
+            type="button"
+            onClick={() => setMainMode('insights')}
+            className={`flex-1 py-1 flex flex-col items-center gap-0.5 rounded-xl transition-all ${
+              mainMode === 'insights'
+                ? isLight
+                  ? 'text-indigo-600 font-bold'
+                  : 'text-indigo-400 font-bold'
+                : isLight
+                ? 'text-slate-400 hover:text-slate-700'
+                : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            <Sparkles size={18} className={mainMode === 'insights' ? 'stroke-[2.5]' : ''} />
+            <span className="text-[11px]">인사이트</span>
+          </button>
+
+          <button
             id="bottom-nav-ledger-btn"
             type="button"
             onClick={() => setMainMode('ledger')}
-            className={`flex-1 py-0.5 flex flex-col items-center gap-0.5 rounded-xl transition-all ${
+            className={`flex-1 py-1 flex flex-col items-center gap-0.5 rounded-xl transition-all ${
               mainMode === 'ledger'
                 ? isLight
                   ? 'text-emerald-600 font-bold'
@@ -1428,6 +1389,7 @@ export function App() {
         onDataChanged={syncPreferences}
         onDataReset={loadTransactions}
         initialTab={settingsInitialTab}
+        initialSubTab={settingsInitialSubTab}
       />
 
       {/* Global Currency Selector Modal */}

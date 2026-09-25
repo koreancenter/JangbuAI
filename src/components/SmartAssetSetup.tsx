@@ -13,29 +13,40 @@ import {
   Loader2,
   Sparkles
 } from 'lucide-react';
-import { Asset, AssetType } from '../types';
+import { Asset, AssetType, Transaction, SupportedCurrency, FxRates } from '../types';
 import { 
   getUserAssets, 
   saveUserAssets, 
   getAssetTypeKo, 
   getAIEngineConfig, 
-  DEFAULT_USER_ASSETS 
+  DEFAULT_USER_ASSETS,
+  DEFAULT_FX_RATES,
+  getUserPreferences
 } from '../utils';
 import { getAllTransactions } from '../db';
 import { MonthlyBudgetSection } from './MonthlyBudgetSection';
+import { SubscriptionManagerSection } from './SubscriptionManagerSection';
+import { detectSubscriptions } from '../autonomousFinance';
 
 interface SmartAssetSetupProps {
   onAssetsUpdated?: (assets: Asset[]) => void;
   theme?: 'dark' | 'light';
+  currentCurrency?: SupportedCurrency;
+  fxRates?: FxRates;
+  initialSubTab?: 'assets' | 'budget' | 'subscriptions';
 }
 
 export const SmartAssetSetup: React.FC<SmartAssetSetupProps> = ({ 
   onAssetsUpdated,
-  theme = 'dark'
+  theme = 'dark',
+  currentCurrency,
+  fxRates,
+  initialSubTab
 }) => {
   const isLight = theme === 'light';
-  const [activeSection, setActiveSection] = useState<'assets' | 'budget'>('assets');
+  const [activeSection, setActiveSection] = useState<'assets' | 'budget' | 'subscriptions'>(initialSubTab || 'assets');
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [inputText, setInputText] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -54,6 +65,26 @@ export const SmartAssetSetup: React.FC<SmartAssetSetupProps> = ({
   const [manualBillingDay, setManualBillingDay] = useState('');
   const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
 
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveSection(initialSubTab);
+    }
+  }, [initialSubTab]);
+
+  const effectiveCurrency: SupportedCurrency = React.useMemo(() => {
+    if (currentCurrency) return currentCurrency;
+    const prefs = getUserPreferences();
+    return (prefs.currencySymbol as SupportedCurrency) || 'KRW';
+  }, [currentCurrency]);
+
+  const effectiveFxRates: FxRates = React.useMemo(() => {
+    return fxRates || DEFAULT_FX_RATES;
+  }, [fxRates]);
+
+  const subscriptionsCount = React.useMemo(() => {
+    return detectSubscriptions(transactions, effectiveCurrency, effectiveFxRates).length;
+  }, [transactions, effectiveCurrency, effectiveFxRates]);
+
   // Load assets and discover payment methods from transactions
   useEffect(() => {
     const loaded = getUserAssets();
@@ -61,9 +92,10 @@ export const SmartAssetSetup: React.FC<SmartAssetSetupProps> = ({
 
     getAllTransactions()
       .then(txs => {
+        setTransactions(txs || []);
         const existingNames = new Set(loaded.map(a => a.name.toLowerCase().replace(/\s+/g, '')));
         const discovered = new Set<string>();
-        for (const tx of txs) {
+        for (const tx of txs || []) {
           if (tx.paymentMethod) {
             const clean = tx.paymentMethod.trim();
             const key = clean.toLowerCase().replace(/\s+/g, '');
@@ -312,6 +344,32 @@ export const SmartAssetSetup: React.FC<SmartAssetSetupProps> = ({
         >
           월간 예산 설정
         </button>
+
+        <button
+          type="button"
+          id="subtab-btn-subscriptions"
+          onClick={() => setActiveSection('subscriptions')}
+          className={`text-xs pb-1 transition-colors relative whitespace-nowrap flex items-center gap-1.5 ${
+            activeSection === 'subscriptions'
+              ? isLight
+                ? 'font-bold text-slate-950 border-b-2 border-slate-950'
+                : 'font-bold text-white border-b-2 border-white'
+              : isLight
+                ? 'text-slate-500 hover:text-slate-800'
+                : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <span>고정 구독</span>
+          {subscriptionsCount > 0 && (
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+              activeSection === 'subscriptions'
+                ? isLight ? 'bg-slate-200 text-slate-900' : 'bg-white/20 text-white'
+                : isLight ? 'bg-emerald-100 text-emerald-800' : 'bg-[#00F5A0]/20 text-[#00F5A0]'
+            }`}>
+              {subscriptionsCount}
+            </span>
+          )}
+        </button>
       </div>
 
       {activeSection === 'budget' ? (
@@ -320,6 +378,17 @@ export const SmartAssetSetup: React.FC<SmartAssetSetupProps> = ({
           onBudgetChanged={() => {
             if (onAssetsUpdated) onAssetsUpdated(assets);
           }} 
+        />
+      ) : activeSection === 'subscriptions' ? (
+        <SubscriptionManagerSection
+          transactions={transactions}
+          currentCurrency={effectiveCurrency}
+          fxRates={effectiveFxRates}
+          theme={theme}
+          onTransactionChange={() => {
+            getAllTransactions().then(txs => setTransactions(txs || []));
+            if (onAssetsUpdated) onAssetsUpdated(assets);
+          }}
         />
       ) : (
         <div className="space-y-4">

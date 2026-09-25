@@ -3,7 +3,7 @@ export type AssetType = 'CARD' | 'BANK' | 'CASH' | 'OTHER';
 // Multi-Brokerage & Comprehensive Asset Classification
 export type AssetCategoryType = 'BROKERAGE' | 'BANK' | 'CRYPTO' | 'REAL_ESTATE' | 'CASH' | 'LIABILITY';
 
-export type LaunchScreenMode = 'vault' | 'ledger';
+export type LaunchScreenMode = 'vault' | 'insights' | 'ledger';
 
 export interface HoldingItem {
   name: string;

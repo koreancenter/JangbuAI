@@ -150,12 +150,22 @@ export function detectCurrency(text: string): CurrencyCode {
  * Payment Instrument Detector
  */
 export function detectPaymentMethod(text: string, isIncome: boolean = false): string {
-  if (/카카오\s*페이|카카오페이|kakaopay/i.test(text)) return 'Kakao Pay';
-  if (/토스\s*페이|toss\s*pay/i.test(text)) return 'Toss Pay';
-  if (/토스뱅크|토스|toss/i.test(text)) return isIncome ? '토스뱅크' : 'Toss';
-  if (/네이버\s*페이|네이버페이|naverpay/i.test(text)) return 'Naver Pay';
-  if (/쿠팡\s*페이|쿠페이|coupangpay/i.test(text)) return 'Coupang Pay';
-  if (/애플\s*페이|애플페이|applepay/i.test(text)) return 'Apple Pay';
+  if (isIncome) {
+    if (/토스뱅크|토스|toss/i.test(text)) return '토스뱅크';
+    if (/기업은행|신한은행|국민은행|하나은행|우리은행|카카오뱅크|케이뱅크|농협은행|sc제일은행|씨티은행/i.test(text)) {
+      const match = text.match(/(기업은행|신한은행|국민은행|하나은행|우리은행|카카오뱅크|케이뱅크|농협은행|sc제일은행|씨티은행)/i);
+      return match ? match[1] : '통장';
+    }
+    if (/현금|지폐|동전|cash/i.test(text)) return '현금';
+    return '통장';
+  }
+
+  if (/카카오\s*페이|카카오페이|kakaopay/i.test(text)) return '카카오페이';
+  if (/토스\s*페이|toss\s*pay/i.test(text)) return '토스페이';
+  if (/토스뱅크|토스|toss/i.test(text)) return '토스';
+  if (/네이버\s*페이|네이버페이|naverpay/i.test(text)) return '네이버페이';
+  if (/쿠팡\s*페이|쿠페이|coupangpay/i.test(text)) return '쿠페이';
+  if (/애플\s*페이|애플페이|applepay/i.test(text)) return '애플페이';
   if (/현대\s*카드|현대카드|hyundai\s*card/i.test(text)) return '현대카드';
   if (/신한\s*카드|신한카드|shinhan\s*card/i.test(text)) return '신한카드';
   if (/국민\s*카드|kb\s*카드|kookmin\s*card/i.test(text)) return 'KB국민카드';
@@ -166,9 +176,9 @@ export function detectPaymentMethod(text: string, isIncome: boolean = false): st
   if (/농협\s*카드|nh\s*카드/i.test(text)) return 'NH농협카드';
   if (/현금|지폐|동전|cash/i.test(text)) return '현금';
   if (/계좌\s*이체|계좌이체|무통장|송금|자동이체|bank\s*transfer|wire|기업은행|신한은행|국민은행|하나은행|우리은행|카카오뱅크|케이뱅크|농협은행|sc제일은행|씨티은행/i.test(text)) return '계좌이체';
-  if (/체크\s*카드|체크카드/i.test(text)) return 'Check Card';
-  if (/신용\s*카드|신용카드|카드\s*결제|카드|card/i.test(text)) return isIncome ? '계좌' : 'Card';
-  return isIncome ? '계좌' : 'Card';
+  if (/체크\s*카드|체크카드/i.test(text)) return '체크카드';
+  if (/신용\s*카드|신용카드|카드\s*결제|카드|card/i.test(text)) return '카드';
+  return '카드';
 }
 
 /**
@@ -284,7 +294,7 @@ const CATEGORY_LEXICON: CategoryRule[] = [
   // --- Fixed: Subscriptions ---
   {
     category: 'Fixed',
-    subCategory: 'Subscriptions',
+    subCategory: '구독',
     patterns: [
       /넷플릭스|netflix|유튜브|youtube|디즈니플러스|disney|티빙|tving|웨이브|wavve|왓챠|watcha|스포티파이|spotify|멜론|melon|지니|genie|벅스|플로|flo|밀리의서재|리디북스|리디|애플|apple|icloud|구글원|google\s*one|chatgpt|openai|claude|notion|노션|aws|클라우드|쿠팡와우|와우멤버십|네이버플러스|구독|subscription/i
     ],
@@ -835,7 +845,7 @@ export function parseFinancialInputDeterministically(rawPrompt: string, debts: D
       const amount = parseKoreanAmount(trimmed);
       if (amount && amount > 0) {
         const { category, subCategory, merchant, confidence } = inferCategoryAndMerchant(trimmed);
-        const itemPaymentMethod = detectPaymentMethod(trimmed) !== 'Card' ? detectPaymentMethod(trimmed) : paymentMethod;
+        const itemPaymentMethod = detectPaymentMethod(trimmed) !== '카드' ? detectPaymentMethod(trimmed) : paymentMethod;
         const cleanDesc = cleanMerchantTitle(trimmed, merchant || '구매 항목');
 
         results.push({

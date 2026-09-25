@@ -12,9 +12,9 @@ export function cleanMerchantTitle(rawText: string, fallback?: string): string {
   s = s.replace(/(?:\$|€|¥|₩|KRW|USD)?\s*[\d,]+(?:\.\d+)?\s*(?:억원|억|천만원|천만|백만원|백만|만원|만|천원|천|원|달러|dollar|eur|유로|euro|jpy|엔|yen|gbp|파운드|k|m)?(?:\s*(?:원|KRW|USD|\$|€|¥|₩))?/gi, ' ');
 
   // Strip Korean postpositions attached to stripped tokens (e.g. "20만원에", "공연을", "호텔에서", "예약을")
-  // Only strip postpositions if they are at the very end of string: "에", "을", "를", "으로", "로", "에서"
+  // Strip postpositions at the end: "에", "을", "를", "으로", "로", "에서", "의"
   s = s.replace(/\s+(?:에|을|를|으로|로|에서|의)\s*$/g, '');
-  s = s.replace(/(?<=[가-힣])(?:에)\s*$/g, ''); // e.g. "20만원에" -> after removing "20만원", trailing "에"
+  s = s.replace(/(?<=[가-힣])(?:에|을|를)\s*$/g, '');
 
   // Strip remaining standalone currency words and particles
   s = s.replace(/(?:^|\s+)(?:원|krw|usd|달러|dollar|eur|jpy|엔|₩|\$|€|¥)(?:\s+|$)/gi, ' ');

@@ -49,7 +49,7 @@ import {
   testGeminiApiKeyOnline
 } from '../geminiKeyManager';
 import { getAllTransactions, addTransactions, clearAllTransactions, replaceAllTransactions } from '../db';
-import { Transaction, ChartPaletteType, EncryptedBackupPayload, UnencryptedBackupPayloadV2 } from '../types';
+import { Transaction, ChartPaletteType, EncryptedBackupPayload, UnencryptedBackupPayloadV2, SupportedCurrency } from '../types';
 import { SmartAssetSetup } from './SmartAssetSetup';
 import { CHART_PALETTES, applyThemeAccent } from '../themePalettes';
 import {
@@ -86,6 +86,7 @@ interface SettingsModalProps {
   onDataChanged?: () => void;
   onDataReset?: () => void;
   initialTab?: 'assets' | 'engine' | 'preferences' | 'privacy';
+  initialSubTab?: 'assets' | 'budget' | 'subscriptions';
 }
 
 // Custom Dark Dropdown Component (replaces browser native <select> to fix white scrollbars and OS styling)
@@ -221,9 +222,23 @@ const resolveSafeTab = (tab: unknown): 'assets' | 'engine' | 'preferences' | 'pr
     : 'assets';
 };
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onDataChanged, onDataReset, initialTab }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ 
+  isOpen, 
+  onClose, 
+  onDataChanged, 
+  onDataReset, 
+  initialTab,
+  initialSubTab 
+}) => {
   // 4-Tab Segmented Control: [ 스마트 자산 | AI 엔진 | 일반 설정 | 데이터 관리 ]
   const [activeTab, setActiveTab] = useState<'assets' | 'engine' | 'preferences' | 'privacy'>(resolveSafeTab(initialTab));
+  const [subTab, setSubTab] = useState<'assets' | 'budget' | 'subscriptions'>(initialSubTab || 'assets');
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
 
   // Tab 1: AI Engine state
   const [engineType, setEngineType] = useState<'local' | 'byok'>('byok');
@@ -252,7 +267,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [chartPalette, setChartPalette] = useState<ChartPaletteType>('default');
   const [autoCategorization, setAutoCategorization] = useState<boolean>(true);
-  const [defaultLaunchScreen, setDefaultLaunchScreen] = useState<'vault' | 'ledger'>('vault');
+  const [defaultLaunchScreen, setDefaultLaunchScreen] = useState<'vault' | 'insights' | 'ledger'>('vault');
 
   // Tab 3: Data & Privacy state
   const [lastExportedDate, setLastExportedDate] = useState<string>('없음');
@@ -954,6 +969,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             <div className="space-y-4 animate-in fade-in duration-150">
               <SmartAssetSetup 
                 theme={theme}
+                currentCurrency={(currencySymbol as SupportedCurrency) || 'KRW'}
+                initialSubTab={subTab}
                 onAssetsUpdated={() => {
                   if (onDataChanged) onDataChanged();
                 }} 
@@ -1368,6 +1385,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                         }`}
                       >
                         자산
+                      </button>
+                      <button
+                        type="button"
+                        id="launch-screen-insights-btn"
+                        onClick={() => {
+                          setDefaultLaunchScreen('insights');
+                          const prefs = getUserPreferences();
+                          saveUserPreferences({ ...prefs, defaultLaunchScreen: 'insights' });
+                          if (onDataChanged) onDataChanged();
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 ${
+                          defaultLaunchScreen === 'insights'
+                            ? isLight
+                              ? 'bg-white text-slate-950 shadow-xs font-bold'
+                              : 'bg-white/15 text-white shadow-xs font-bold'
+                            : isLight
+                              ? 'text-slate-600 hover:text-slate-900'
+                              : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        인사이트
                       </button>
                       <button
                         type="button"
